@@ -1,0 +1,135 @@
+{
+  "inventory": {
+    "total_pages": 30000,
+    "total_clients": 32,
+    "min_pages_per_client": 3,
+    "max_pages_per_client": 7008,
+    "median_pages_per_client": 567.0
+  },
+  "target_analysis": {
+    "definition": "trend_direction == 'down'",
+    "framing": "Starter Proxy Model / Current-Window Baseline",
+    "is_future_forecast": false,
+    "total_positive_cases": 16262,
+    "positive_rate_pct": 54.21,
+    "trend_direction_breakdown": {
+      "down": 16262,
+      "stable": 5962,
+      "up": 4388,
+      "new": 2236,
+      "flat": 1152
+    }
+  },
+  "content_archetype_distribution": {
+    "content_type": {
+      "keyword article": 27207,
+      "feedly article": 2096,
+      "comparison article": 697
+    },
+    "main_intent": {
+      "informational": 17235,
+      "transactional": 5733,
+      "commercial": 4612,
+      "nan": 2374,
+      "navigational": 46
+    }
+  },
+  "numeric_distributions": {
+    "impressions_90d": {
+      "mean": 5200.37,
+      "std": 16838.02,
+      "median": 731.0,
+      "p25": 81.0,
+      "p75": 3615.25,
+      "p95": 22996.5,
+      "max": 517715.0
+    },
+    "clicks_90d": {
+      "mean": 16.1,
+      "std": 75.08,
+      "median": 1.0,
+      "p25": 0.0,
+      "p75": 7.0,
+      "p95": 69.05,
+      "max": 4178.0
+    },
+    "sessions_90d": {
+      "mean": 37.07,
+      "std": 107.07,
+      "median": 7.0,
+      "p25": 2.0,
+      "p75": 27.0,
+      "p95": 166.0,
+      "max": 4345.0
+    },
+    "pageviews_90d": {
+      "mean": 49.94,
+      "std": 152.1,
+      "median": 8.0,
+      "p25": 2.0,
+      "p75": 33.0,
+      "p95": 231.05,
+      "max": 5998.0
+    },
+    "engaged_sessions_90d": {
+      "mean": 0.99,
+      "std": 4.36,
+      "median": 0.0,
+      "p25": 0.0,
+      "p75": 1.0,
+      "p95": 5.0,
+      "max": 290.0
+    },
+    "ai_sessions_90d": {
+      "mean": 0.2,
+      "std": 1.36,
+      "median": 0.0,
+      "p25": 0.0,
+      "p75": 0.0,
+      "p95": 1.0,
+      "max": 64.0
+    },
+    "ctr": {
+      "mean": 0.51,
+      "std": 3.28,
+      "median": 0.07,
+      "p25": 0.0,
+      "p75": 0.29,
+      "p95": 1.09,
+      "max": 100.0
+    },
+    "avg_position": {
+      "mean": 16.34,
+      "std": 15.22,
+      "median": 10.8,
+      "p25": 6.2,
+      "p75": 22.3,
+      "p95": 48.2,
+      "max": 245.0
+    },
+    "engagement_rate": {
+      "mean": 2.53,
+      "std": 8.31,
+      "median": 0.0,
+      "p25": 0.0,
+      "p75": 1.35,
+      "p95": 12.5,
+      "max": 100.0
+    },
+    "scroll_rate": {
+      "mean": 18.21,
+      "std": 29.47,
+      "median": 5.0,
+      "p25": 0.0,
+      "p75": 23.53,
+      "p95": 100.0,
+      "max": 300.0
+    }
+  },
+  "ai_referral_analysis": {
+    "total_ai_sessions": 6135,
+    "pages_with_ai_traffic": 1930,
+    "pct_pages_with_ai": 6.43,
+    "sparsity_guidance": "AI referral traffic is extremely sparse (~6% of pages). It serves as an auxiliary signal, never as the standalone core classification target."
+  }
+}

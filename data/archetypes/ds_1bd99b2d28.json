@@ -1,0 +1,78 @@
+{
+  "method": "K-Means (Standardized Behavioral Features)",
+  "features_used": [
+    "impressions_90d",
+    "clicks_90d",
+    "sessions_90d",
+    "ctr",
+    "avg_position",
+    "days_since_last_update",
+    "engagement_rate",
+    "scroll_rate"
+  ],
+  "n_clusters": 5,
+  "inertia": 63.167616367026106,
+  "profiles": {
+    "0": {
+      "cluster_id": 0,
+      "archetype_name": "High Performers",
+      "recommended_action": "PROTECT",
+      "size": 11,
+      "share_pct": 44.0,
+      "median_impressions": 1724.0,
+      "median_ctr": 0.06,
+      "median_position": 10.6,
+      "median_days_since_update": 22.0,
+      "median_engagement_rate": 0.0
+    },
+    "1": {
+      "cluster_id": 1,
+      "archetype_name": "Declining Winners",
+      "recommended_action": "REFRESH",
+      "size": 4,
+      "share_pct": 16.0,
+      "median_impressions": 17383.5,
+      "median_ctr": 0.91,
+      "median_position": 4.85,
+      "median_days_since_update": 104.0,
+      "median_engagement_rate": 2.18
+    },
+    "2": {
+      "cluster_id": 2,
+      "archetype_name": "High Visibility / Low CTR",
+      "recommended_action": "OPTIMIZE",
+      "size": 4,
+      "share_pct": 16.0,
+      "median_impressions": 15860.5,
+      "median_ctr": 0.09,
+      "median_position": 41.9,
+      "median_days_since_update": 20.0,
+      "median_engagement_rate": 0.0
+    },
+    "3": {
+      "cluster_id": 3,
+      "archetype_name": "Growing Content",
+      "recommended_action": "MONITOR",
+      "size": 1,
+      "share_pct": 4.0,
+      "median_impressions": 38.0,
+      "median_ctr": 23.68,
+      "median_position": 7.8,
+      "median_days_since_update": 8.0,
+      "median_engagement_rate": 33.33
+    },
+    "4": {
+      "cluster_id": 4,
+      "archetype_name": "Stagnant Content",
+      "recommended_action": "REFRESH",
+      "size": 5,
+      "share_pct": 20.0,
+      "median_impressions": 2311.0,
+      "median_ctr": 0.34,
+      "median_position": 6.9,
+      "median_days_since_update": 20.0,
+      "median_engagement_rate": 0.0
+    }
+  },
+  "interpretability_notice": "Clusters are grouped purely by observable quantitative search and engagement patterns."
+}

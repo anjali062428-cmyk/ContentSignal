@@ -1,0 +1,85 @@
+{
+  "available": true,
+  "dataset_id": "ds_2afb64aa5b",
+  "dataset_name": "ContentSignal_Test_300",
+  "row_count": 300,
+  "min_required": 50,
+  "additional_needed": 0,
+  "status_badge": "Sufficient data",
+  "method": "K-Means (Standardized Behavioral Features)",
+  "features_used": [
+    "impressions_90d",
+    "clicks_90d",
+    "sessions_90d",
+    "ctr",
+    "avg_position",
+    "days_since_last_update",
+    "engagement_rate",
+    "scroll_rate"
+  ],
+  "n_clusters": 5,
+  "profiles": {
+    "0": {
+      "cluster_id": 0,
+      "archetype_name": "High Performers",
+      "recommended_action": "PROTECT",
+      "size": 32,
+      "share_pct": 10.7,
+      "median_impressions": 9816.0,
+      "median_ctr": 6.39,
+      "median_position": 27.9,
+      "median_days_since_update": 0.0,
+      "median_engagement_rate": 19.7
+    },
+    "1": {
+      "cluster_id": 1,
+      "archetype_name": "High Performers",
+      "recommended_action": "PROTECT",
+      "size": 72,
+      "share_pct": 24.0,
+      "median_impressions": 13395.5,
+      "median_ctr": 3.6,
+      "median_position": 40.6,
+      "median_days_since_update": 0.0,
+      "median_engagement_rate": 17.6
+    },
+    "2": {
+      "cluster_id": 2,
+      "archetype_name": "High Performers",
+      "recommended_action": "PROTECT",
+      "size": 74,
+      "share_pct": 24.7,
+      "median_impressions": 10682.0,
+      "median_ctr": 3.6,
+      "median_position": 10.8,
+      "median_days_since_update": 0.0,
+      "median_engagement_rate": 27.1
+    },
+    "3": {
+      "cluster_id": 3,
+      "archetype_name": "High Performers",
+      "recommended_action": "PROTECT",
+      "size": 89,
+      "share_pct": 29.7,
+      "median_impressions": 10953.0,
+      "median_ctr": 9.65,
+      "median_position": 25.1,
+      "median_days_since_update": 0.0,
+      "median_engagement_rate": 15.5
+    },
+    "4": {
+      "cluster_id": 4,
+      "archetype_name": "High Performers",
+      "recommended_action": "PROTECT",
+      "size": 33,
+      "share_pct": 11.0,
+      "median_impressions": 1752.0,
+      "median_ctr": 6.94,
+      "median_position": 28.5,
+      "median_days_since_update": 0.0,
+      "median_engagement_rate": 15.7
+    }
+  },
+  "has_sufficient_variance": true,
+  "interpretability_notice": "Clusters are grouped purely by observable quantitative search and engagement patterns."
+}

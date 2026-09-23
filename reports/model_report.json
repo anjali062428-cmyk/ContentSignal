@@ -1,0 +1,276 @@
+{
+  "metadata": {
+    "target_definition": "Starter proxy model: is_declining_label = (trend_direction == 'down')",
+    "target_type": "current-window proxy baseline",
+    "is_future_prediction": false,
+    "random_seed": 42,
+    "feature_count_raw": 40,
+    "feature_count_transformed": 70
+  },
+  "split": {
+    "validation_strategy": "client-group holdout",
+    "total_rows": 30000,
+    "train_rows": 26619,
+    "test_rows": 3381,
+    "total_clients": 32,
+    "train_clients": 26,
+    "test_clients": 6,
+    "train_client_list": [
+      "client_02d20bbd7e",
+      "client_434c9b5ae5",
+      "client_4ec9599fc2",
+      "client_f369cb89fc",
+      "client_3fdba35f04",
+      "client_d029fa3a95",
+      "client_8722616204",
+      "client_d59eced1de",
+      "client_e629fa6598",
+      "client_b4944c6ff0",
+      "client_4e07408562",
+      "client_7f2253d7e2",
+      "client_0b918943df",
+      "client_19581e27de",
+      "client_e29c9c180c",
+      "client_1a6562590e",
+      "client_25fc0e7096",
+      "client_98a3ab7c34",
+      "client_4fc82b26ae",
+      "client_624b60c58c",
+      "client_d4735e3a26",
+      "client_349c41201b",
+      "client_2c624232cd",
+      "client_bdd2d3af3a",
+      "client_f74efabef1",
+      "client_6208ef0f77"
+    ],
+    "test_client_list": [
+      "client_8b940be7fb",
+      "client_bbb965ab0c",
+      "client_9400f1b21c",
+      "client_a88a7902cb",
+      "client_8527a891e2",
+      "client_9f14025af0"
+    ]
+  },
+  "selected_model": {
+    "model_name": "gradient_boosting",
+    "selection_rationale": "Selected primarily based on Precision@50 and Precision@20 since the primary SaaS deliverable is a ranked editorial review queue for human content teams, supplemented by PR-AUC and ROC-AUC.",
+    "pipeline_path": "data/processed/best_model.joblib"
+  },
+  "metrics": {
+    "transparent_baseline": {
+      "roc_auc": 0.5938,
+      "pr_auc": 0.5669,
+      "precision": 0.46,
+      "recall": 0.0777,
+      "f1": 0.133,
+      "confusion_matrix": [
+        [
+          1444,
+          162
+        ],
+        [
+          1637,
+          138
+        ]
+      ],
+      "precision_at_20": 0.35,
+      "precision_at_50": 0.36,
+      "precision_at_100": 0.33
+    },
+    "logistic_regression": {
+      "roc_auc": 0.651,
+      "pr_auc": 0.6428,
+      "precision": 0.6109,
+      "recall": 0.7324,
+      "f1": 0.6662,
+      "confusion_matrix": [
+        [
+          778,
+          828
+        ],
+        [
+          475,
+          1300
+        ]
+      ],
+      "precision_at_20": 0.75,
+      "precision_at_50": 0.7,
+      "precision_at_100": 0.7
+    },
+    "random_forest": {
+      "roc_auc": 0.6617,
+      "pr_auc": 0.6287,
+      "precision": 0.6095,
+      "recall": 0.7915,
+      "f1": 0.6887,
+      "confusion_matrix": [
+        [
+          706,
+          900
+        ],
+        [
+          370,
+          1405
+        ]
+      ],
+      "precision_at_20": 0.45,
+      "precision_at_50": 0.44,
+      "precision_at_100": 0.48
+    },
+    "gradient_boosting": {
+      "roc_auc": 0.6945,
+      "pr_auc": 0.6791,
+      "precision": 0.64,
+      "recall": 0.747,
+      "f1": 0.6894,
+      "confusion_matrix": [
+        [
+          860,
+          746
+        ],
+        [
+          449,
+          1326
+        ]
+      ],
+      "precision_at_20": 0.6,
+      "precision_at_50": 0.68,
+      "precision_at_100": 0.72
+    }
+  },
+  "feature_importance": {
+    "random_forest_top_features": [
+      {
+        "feature": "days_with_impressions",
+        "importance": 0.0859
+      },
+      {
+        "feature": "log_impressions_90d",
+        "importance": 0.084
+      },
+      {
+        "feature": "impressions_90d",
+        "importance": 0.0839
+      },
+      {
+        "feature": "content_age_days",
+        "importance": 0.0726
+      },
+      {
+        "feature": "avg_position",
+        "importance": 0.0617
+      },
+      {
+        "feature": "word_count",
+        "importance": 0.0394
+      },
+      {
+        "feature": "char_count",
+        "importance": 0.0359
+      },
+      {
+        "feature": "scroll_rate",
+        "importance": 0.0284
+      },
+      {
+        "feature": "ctr",
+        "importance": 0.0267
+      },
+      {
+        "feature": "clicks_90d",
+        "importance": 0.0224
+      },
+      {
+        "feature": "log_clicks_90d",
+        "importance": 0.0213
+      },
+      {
+        "feature": "is_missing_position",
+        "importance": 0.0208
+      },
+      {
+        "feature": "days_with_sessions",
+        "importance": 0.0208
+      },
+      {
+        "feature": "click_to_session_ratio",
+        "importance": 0.02
+      },
+      {
+        "feature": "pageviews_90d",
+        "importance": 0.02
+      }
+    ],
+    "logistic_regression_top_coefficients": [
+      {
+        "feature": "log_impressions_90d",
+        "coefficient": 1.1779
+      },
+      {
+        "feature": "users_90d",
+        "coefficient": -0.8043
+      },
+      {
+        "feature": "is_missing_position",
+        "coefficient": -0.7919
+      },
+      {
+        "feature": "freshness_tier_181+",
+        "coefficient": 0.7285
+      },
+      {
+        "feature": "log_clicks_90d",
+        "coefficient": -0.6759
+      },
+      {
+        "feature": "word_count_tier_1000-2000",
+        "coefficient": 0.657
+      },
+      {
+        "feature": "freshness_tier_31-90",
+        "coefficient": -0.6373
+      },
+      {
+        "feature": "sessions_90d",
+        "coefficient": 0.6356
+      },
+      {
+        "feature": "impression_tier_low",
+        "coefficient": 0.5922
+      },
+      {
+        "feature": "word_count",
+        "coefficient": 0.4967
+      },
+      {
+        "feature": "content_age_days",
+        "coefficient": -0.4565
+      },
+      {
+        "feature": "content_type_keyword article",
+        "coefficient": 0.4473
+      },
+      {
+        "feature": "main_intent_unknown",
+        "coefficient": 0.4248
+      },
+      {
+        "feature": "word_count_tier_<1000",
+        "coefficient": -0.3924
+      },
+      {
+        "feature": "impression_tier_excellent",
+        "coefficient": -0.3839
+      }
+    ]
+  },
+  "leakage_audit_summary": {
+    "passed": true,
+    "features_audited": 40
+  },
+  "future_window_extension": {
+    "status": "Not yet run \u2014 requires warehouse access.",
+    "description": "Requires prior 90-day features predicting forward 30-day outcomes across daily warehouse tables."
+  }
+}

@@ -1,0 +1,90 @@
+{
+  "method": "K-Means (Standardized Behavioral Features)",
+  "features_used": [
+    "log_impressions_90d",
+    "log_clicks_90d",
+    "log_sessions_90d",
+    "ctr",
+    "avg_position",
+    "days_since_last_update",
+    "engagement_rate",
+    "scroll_rate"
+  ],
+  "n_clusters": 6,
+  "inertia": 106031.09,
+  "profiles": {
+    "0": {
+      "cluster_id": 0,
+      "archetype_name": "High Performers",
+      "recommended_action": "PROTECT",
+      "size": 5942,
+      "share_pct": 19.8,
+      "median_impressions": 700.0,
+      "median_ctr": 0.01,
+      "median_position": 14.7,
+      "median_days_since_update": 104.0,
+      "median_engagement_rate": 0.0
+    },
+    "1": {
+      "cluster_id": 1,
+      "archetype_name": "Declining Winners",
+      "recommended_action": "REFRESH",
+      "size": 3090,
+      "share_pct": 10.3,
+      "median_impressions": 26.0,
+      "median_ctr": 0.0,
+      "median_position": 9.0,
+      "median_days_since_update": 20.0,
+      "median_engagement_rate": 0.0
+    },
+    "2": {
+      "cluster_id": 2,
+      "archetype_name": "High Visibility / Low CTR",
+      "recommended_action": "OPTIMIZE",
+      "size": 7942,
+      "share_pct": 26.5,
+      "median_impressions": 8426.0,
+      "median_ctr": 0.29,
+      "median_position": 8.4,
+      "median_days_since_update": 22.0,
+      "median_engagement_rate": 2.3
+    },
+    "3": {
+      "cluster_id": 3,
+      "archetype_name": "Growing Content",
+      "recommended_action": "MONITOR",
+      "size": 483,
+      "share_pct": 1.6,
+      "median_impressions": 296.0,
+      "median_ctr": 0.12,
+      "median_position": 11.4,
+      "median_days_since_update": 20.0,
+      "median_engagement_rate": 50.0
+    },
+    "4": {
+      "cluster_id": 4,
+      "archetype_name": "Stagnant Content",
+      "recommended_action": "REFRESH",
+      "size": 143,
+      "share_pct": 0.5,
+      "median_impressions": 3.0,
+      "median_ctr": 33.33,
+      "median_position": 3.7,
+      "median_days_since_update": 20.0,
+      "median_engagement_rate": 0.0
+    },
+    "5": {
+      "cluster_id": 5,
+      "archetype_name": "Low Visibility / Tail",
+      "recommended_action": "INVESTIGATE",
+      "size": 12400,
+      "share_pct": 41.3,
+      "median_impressions": 287.0,
+      "median_ctr": 0.0,
+      "median_position": 12.5,
+      "median_days_since_update": 20.0,
+      "median_engagement_rate": 0.0
+    }
+  },
+  "interpretability_notice": "Clusters are grouped purely by observable quantitative search and engagement patterns. They do not represent semantic topic clusters because article body text is not in the dataset."
+}

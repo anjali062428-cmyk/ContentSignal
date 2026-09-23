@@ -1,0 +1,36 @@
+{
+  "archetypes": [
+    {
+      "id": 0,
+      "name": "High-Yield Optimization Candidates",
+      "action": "OPTIMIZE",
+      "page_count": 0,
+      "pct_of_catalog": 0.0,
+      "strategic_directive": "Focus on metadata and search snippet refinement to capture available search volume."
+    },
+    {
+      "id": 1,
+      "name": "Decay Vulnerable Assets",
+      "action": "REFRESH",
+      "page_count": 10,
+      "pct_of_catalog": 50.0,
+      "strategic_directive": "Prioritize factual refreshes, new examples, and updated headers."
+    },
+    {
+      "id": 2,
+      "name": "Core Stable Anchors",
+      "action": "PROTECT",
+      "page_count": 0,
+      "pct_of_catalog": 0.0,
+      "strategic_directive": "Protect against URL changes and retain internal cross-links."
+    },
+    {
+      "id": 3,
+      "name": "Low-Activity Monitoring Set",
+      "action": "MONITOR",
+      "page_count": 10,
+      "pct_of_catalog": 50.0,
+      "strategic_directive": "Track over subsequent reporting cycles."
+    }
+  ]
+}

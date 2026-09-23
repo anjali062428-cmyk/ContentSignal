@@ -1,0 +1,86 @@
+{
+  "audit_passed": true,
+  "total_features_evaluated": 40,
+  "forbidden_features_detected": 0,
+  "classification": {
+    "1_restricted_proprietary_columns": [
+      "ai_opportunity",
+      "health_score",
+      "is_declining",
+      "is_initial_refresh_candidate",
+      "is_quick_win",
+      "is_underperformer",
+      "needs_ctr_fix",
+      "needs_engagement_fix",
+      "needs_indexing"
+    ],
+    "2_identifiers": [
+      "client_id",
+      "content_id"
+    ],
+    "3_target_columns": [
+      "is_declining_label"
+    ],
+    "4_direct_target_construction_variables": [
+      "impressions_last_30d",
+      "impressions_prev_30d",
+      "impressions_change_30d",
+      "trend_direction",
+      "trend_pct"
+    ],
+    "5_future_variables": [
+      "next_30d_impressions (warehouse only)",
+      "next_30d_clicks (warehouse only)",
+      "next_30d_recovery_status (warehouse only)"
+    ],
+    "6_legitimate_predictive_features": [
+      "age_tier",
+      "age_tier_order",
+      "ai_sessions_90d",
+      "ai_traffic_pct",
+      "avg_position",
+      "char_count",
+      "char_count_tier",
+      "click_to_session_ratio",
+      "clicks_90d",
+      "competition",
+      "competition_level",
+      "content_age_days",
+      "content_type",
+      "cpc",
+      "ctr",
+      "days_since_last_update",
+      "days_with_impressions",
+      "days_with_sessions",
+      "engaged_session_ratio",
+      "engaged_sessions_90d",
+      "engagement_rate",
+      "freshness_tier",
+      "impression_tier",
+      "impressions_90d",
+      "is_missing_keyword_context",
+      "is_missing_position",
+      "is_missing_word_count",
+      "log_clicks_90d",
+      "log_impressions_90d",
+      "log_sessions_90d",
+      "main_intent",
+      "pageviews_90d",
+      "position_tier",
+      "scroll_events_90d",
+      "scroll_rate",
+      "search_volume",
+      "sessions_90d",
+      "users_90d",
+      "word_count",
+      "word_count_tier"
+    ]
+  },
+  "rules_enforced": [
+    "Zero proprietary FlyRank decision columns",
+    "Zero client or content identifiers in feature matrix",
+    "Zero target construction columns (impressions_last_30d, impressions_prev_30d, trend_pct, trend_direction)",
+    "Zero subtoken leaks or mathematical reconstructors",
+    "Dynamic inspection of actual estimator feature names"
+  ]
+}

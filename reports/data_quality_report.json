@@ -1,0 +1,112 @@
+{
+  "raw_dataset": {
+    "path": "data/raw/content_refresh_anonymized.csv",
+    "rows": 30000,
+    "columns": 53
+  },
+  "clean_dataset": {
+    "rows": 30000,
+    "columns": 44,
+    "unique_pages": 30000,
+    "unique_clients": 32,
+    "exact_44_documented_columns": true
+  },
+  "quarantine_audit": {
+    "quarantined_columns_found": [
+      "health_score",
+      "needs_indexing",
+      "is_quick_win",
+      "needs_ctr_fix",
+      "needs_engagement_fix",
+      "ai_opportunity",
+      "is_underperformer",
+      "is_declining",
+      "is_initial_refresh_candidate"
+    ],
+    "quarantined_columns_missing": [],
+    "quarantine_count": 9,
+    "status": "QUARANTINED_SUCCESSFULLY"
+  },
+  "sentinel_analysis": {
+    "avg_position_zero_means_missing": true,
+    "zero_avg_position_count": 1205,
+    "zero_avg_position_pct": 4.02
+  },
+  "systematic_missingness": {
+    "columns_with_nulls": {
+      "search_volume": 2468,
+      "competition": 2468,
+      "competition_level": 2610,
+      "cpc": 2468,
+      "main_intent": 2374,
+      "word_count": 7699,
+      "char_count": 7699,
+      "provider_used": 21438,
+      "model_used": 5733,
+      "scroll_rate": 125,
+      "trend_pct": 3388,
+      "word_count_tier": 7699,
+      "char_count_tier": 7699
+    },
+    "by_content_type": {
+      "comparison article": {
+        "search_volume_missing": 0,
+        "cpc_missing": 0,
+        "word_count_missing": 0,
+        "total_rows": 697
+      },
+      "feedly article": {
+        "search_volume_missing": 2096,
+        "cpc_missing": 2096,
+        "word_count_missing": 0,
+        "total_rows": 2096
+      },
+      "keyword article": {
+        "search_volume_missing": 372,
+        "cpc_missing": 372,
+        "word_count_missing": 7699,
+        "total_rows": 27207
+      }
+    }
+  },
+  "rate_scale_verification": {
+    "notes": "Rates (ctr, engagement_rate, etc.) are 0-100 percentage values (e.g., ctr=0.76 means 0.76%).",
+    "metrics": {
+      "ctr": {
+        "min": 0.0,
+        "max": 100.0,
+        "mean": 0.5107333333333334,
+        "median": 0.07,
+        "values_above_100": 0
+      },
+      "engagement_rate": {
+        "min": 0.0,
+        "max": 100.0,
+        "mean": 2.5345199999999997,
+        "median": 0.0,
+        "values_above_100": 0
+      },
+      "scroll_rate": {
+        "min": 0.0,
+        "max": 300.0,
+        "mean": 18.212921171548118,
+        "median": 5.0,
+        "values_above_100": 119
+      },
+      "ai_traffic_pct": {
+        "min": 0.0,
+        "max": 300.0,
+        "mean": 0.7681963333333333,
+        "median": 0.0,
+        "values_above_100": 23
+      },
+      "trend_pct": {
+        "min": -100.0,
+        "max": 44900.0,
+        "mean": -4.785968735908613,
+        "median": -33.5,
+        "values_above_100": 1338
+      }
+    }
+  }
+}

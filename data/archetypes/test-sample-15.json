@@ -1,0 +1,54 @@
+{
+  "method": "K-Means (Standardized Behavioral Features)",
+  "features_used": [
+    "impressions_90d",
+    "clicks_90d",
+    "sessions_90d",
+    "ctr",
+    "avg_position",
+    "days_since_last_update",
+    "engagement_rate",
+    "scroll_rate"
+  ],
+  "n_clusters": 3,
+  "inertia": 50.18139389251493,
+  "profiles": {
+    "0": {
+      "cluster_id": 0,
+      "archetype_name": "High Performers",
+      "recommended_action": "PROTECT",
+      "size": 4,
+      "share_pct": 26.7,
+      "median_impressions": 15860.5,
+      "median_ctr": 0.09,
+      "median_position": 41.9,
+      "median_days_since_update": 20.0,
+      "median_engagement_rate": 0.0
+    },
+    "1": {
+      "cluster_id": 1,
+      "archetype_name": "Declining Winners",
+      "recommended_action": "REFRESH",
+      "size": 9,
+      "share_pct": 60.0,
+      "median_impressions": 1724.0,
+      "median_ctr": 0.05,
+      "median_position": 8.5,
+      "median_days_since_update": 22.0,
+      "median_engagement_rate": 0.0
+    },
+    "2": {
+      "cluster_id": 2,
+      "archetype_name": "High Visibility / Low CTR",
+      "recommended_action": "OPTIMIZE",
+      "size": 2,
+      "share_pct": 13.3,
+      "median_impressions": 14073.5,
+      "median_ctr": 1.655,
+      "median_position": 3.9,
+      "median_days_since_update": 104.0,
+      "median_engagement_rate": 5.09
+    }
+  },
+  "interpretability_notice": "Clusters are grouped purely by observable quantitative search and engagement patterns."
+}

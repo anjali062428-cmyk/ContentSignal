@@ -5,10 +5,13 @@ const nextConfig = {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8001/api",
   },
   async rewrites() {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL
+      ? process.env.NEXT_PUBLIC_API_URL.replace(/\/+$/, "")
+      : "http://127.0.0.1:8001/api";
     return [
       {
         source: "/api/:path*",
-        destination: "http://127.0.0.1:8001/api/:path*",
+        destination: `${apiUrl}/:path*`,
       },
     ];
   },

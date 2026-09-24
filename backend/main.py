@@ -17,7 +17,8 @@ if str(_SRC_DIR) not in sys.path:
 if str(_BASE_DIR) not in sys.path:
     sys.path.insert(0, str(_BASE_DIR))
 
-from backend.database import get_db
+from backend.config import FRONTEND_URL
+from backend.database import get_db, ensure_columns, SessionLocal
 from backend.routers import auth, opportunities, models, ai, datasets, watchlist, impact, export, runs, projects
 from backend.schemas import UserLoginRequest, TokenResponse
 from backend.routers.auth import login as auth_login
@@ -31,19 +32,49 @@ app = FastAPI(
 )
 
 # Configure CORS
+origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "http://localhost:8001",
+    "http://127.0.0.1:8001",
+]
+
+if FRONTEND_URL:
+    for url in FRONTEND_URL.split(","):
+        cleaned = url.strip().rstrip("/")
+        if cleaned and cleaned not in origins:
+            origins.append(cleaned)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
-    ],
+    allow_origins=origins,
     allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:[0-9]+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+def startup_event():
+    """Ensure database schema is ready and seed 30k pages if database is unseeded."""
+    try:
+        ensure_columns()
+    except Exception as e:
+        print(f"Warning: ensure_columns on startup: {e}")
+
+    try:
+        from backend.models import Page
+        with SessionLocal() as db:
+            if db.query(Page).count() == 0:
+                print("Database is empty. Initializing catalog data from opportunities.csv...")
+                from backend.seed import seed_database
+                seed_database()
+    except Exception as e:
+        print(f"Startup database check notice: {e}")
+
 
 # Include Routers
 app.include_router(auth.router)

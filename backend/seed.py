@@ -29,10 +29,9 @@ def backfill_time_window_metrics(db: Session):
         print(f"File not found: {OPPORTUNITIES_PATH}")
         return
 
-    import sqlite3
-    db_path = BASE_DIR / "content_intelligence.db"
-    conn = sqlite3.connect(str(db_path))
+    conn = engine.raw_connection()
     cursor = conn.cursor()
+
 
     df = pd.read_csv(OPPORTUNITIES_PATH)
     pm_updates = []

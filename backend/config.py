@@ -15,6 +15,10 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 # Application Environment
 APP_ENV = os.getenv("APP_ENV", os.getenv("ENVIRONMENT", "development")).lower()
 
+# Frontend URL for production CORS (e.g. https://contentsignal.vercel.app or comma-separated URLs)
+FRONTEND_URL = (os.getenv("FRONTEND_URL") or "").strip()
+
+
 # JWT Configuration
 _jwt_env = os.getenv("JWT_SECRET")
 if APP_ENV == "production":

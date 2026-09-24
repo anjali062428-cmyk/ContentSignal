@@ -47,3 +47,4 @@ tzdata==2026.4
 uvicorn==0.53.0
 reportlab==5.0.1
 python-docx==1.2.0
+openpyxl==3.1.5

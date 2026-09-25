@@ -22,6 +22,7 @@ from backend.config import (
     EMAIL_FROM_NAME,
     APP_ENV,
     DEV_OTP_MODE,
+    get_effective_email_from,
 )
 
 logger = logging.getLogger("contentsignal.email")
@@ -59,7 +60,8 @@ def get_email_provider() -> str:
 def get_email_provider_status() -> Dict[str, Any]:
     """Return non-sensitive status information about email configuration."""
     provider = get_email_provider()
-    sender = f"{EMAIL_FROM_NAME} <{EMAIL_FROM}>" if EMAIL_FROM_NAME else EMAIL_FROM
+    effective_from = get_effective_email_from(provider)
+    sender = f"{EMAIL_FROM_NAME} <{effective_from}>" if EMAIL_FROM_NAME else effective_from
     return {
         "provider": provider,
         "is_configured": provider in ("resend", "smtp"),
@@ -276,7 +278,8 @@ The ContentSignal Team
 
 def _send_via_resend(to_email: str, subject: str, html: str, text: str) -> Dict[str, Any]:
     """Send verification email using Resend HTTP API."""
-    sender = f"{EMAIL_FROM_NAME} <{EMAIL_FROM}>" if EMAIL_FROM_NAME else EMAIL_FROM
+    effective_from = get_effective_email_from("resend")
+    sender = f"{EMAIL_FROM_NAME} <{effective_from}>" if EMAIL_FROM_NAME else effective_from
     url = "https://api.resend.com/emails"
     headers = {
         "Authorization": f"Bearer {RESEND_API_KEY.strip()}",
@@ -290,6 +293,9 @@ def _send_via_resend(to_email: str, subject: str, html: str, text: str) -> Dict[
         "text": text,
     }
 
+    sender_domain = effective_from.split("@")[-1] if "@" in effective_from else "unknown"
+    logger.info("[RESEND] Sending email to %s via @%s", mask_email_address(to_email), sender_domain)
+
     try:
         with httpx.Client(timeout=10.0) as client:
             response = client.post(url, headers=headers, json=payload)
@@ -297,7 +303,7 @@ def _send_via_resend(to_email: str, subject: str, html: str, text: str) -> Dict[
                 data = response.json()
                 delivery_id = data.get("id", "resend_ok")
                 logger.info(
-                    "Verification email successfully delivered via Resend to %s (id: %s)",
+                    "[RESEND] Delivery SUCCESS to %s (id: %s)",
                     mask_email_address(to_email),
                     delivery_id,
                 )
@@ -308,9 +314,9 @@ def _send_via_resend(to_email: str, subject: str, html: str, text: str) -> Dict[
                     "message": "Verification email dispatched via Resend.",
                 }
             else:
-                err_detail = response.text
+                err_detail = response.text[:200]
                 logger.error(
-                    "Resend API rejected email to %s: HTTP %s - %s",
+                    "[RESEND] API rejected dispatch to %s (HTTP %s): %s",
                     mask_email_address(to_email),
                     response.status_code,
                     err_detail,
@@ -318,20 +324,22 @@ def _send_via_resend(to_email: str, subject: str, html: str, text: str) -> Dict[
                 return {
                     "success": False,
                     "provider": "resend",
+                    "code": f"RESEND_{response.status_code}",
                     "delivery_id": None,
-                    "message": f"Resend API returned status {response.status_code}: {err_detail}",
+                    "message": f"Resend API error: HTTP {response.status_code}",
                 }
     except Exception as e:
         logger.error(
-            "Exception while sending email via Resend to %s: %s",
+            "[RESEND] Network exception during email dispatch to %s: %s",
             mask_email_address(to_email),
-            str(e),
+            type(e).__name__,
         )
         return {
             "success": False,
             "provider": "resend",
+            "code": "RESEND_NETWORK_ERROR",
             "delivery_id": None,
-            "message": f"Network exception during Resend dispatch: {str(e)}",
+            "message": "Network exception during email dispatch.",
         }
 
 

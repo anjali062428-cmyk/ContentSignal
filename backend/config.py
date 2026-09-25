@@ -56,13 +56,35 @@ SMTP_PASSWORD = (
 SMTP_USE_SSL = SMTP_SECURE or os.getenv("SMTP_USE_SSL", "false").lower() in ("true", "1", "yes") or SMTP_PORT == 465
 SMTP_USE_TLS = (os.getenv("SMTP_USE_TLS", "true").lower() in ("true", "1", "yes")) and not SMTP_USE_SSL
 
-# Sender Identity
-EMAIL_FROM = (
-    os.getenv("SMTP_FROM") or 
+# Sender Identity Configuration
+EMAIL_FROM_NAME = os.getenv("EMAIL_FROM_NAME", "ContentSignal").strip()
+_raw_configured_from = (
     os.getenv("EMAIL_FROM") or 
+    os.getenv("RESEND_FROM") or 
+    os.getenv("SMTP_FROM") or 
     os.getenv("SMTP_USER") or 
     os.getenv("EMAIL_USER") or 
-    "noreply@contentsignal.ai"
+    ""
 ).strip()
-EMAIL_FROM_NAME = os.getenv("EMAIL_FROM_NAME", "ContentSignal")
+
+PUBLIC_EMAIL_DOMAINS = ("gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "icloud.com", "aol.com")
+
+def get_effective_email_from(provider: str) -> str:
+    """
+    Deterministic email sender resolution.
+    If provider is Resend and the configured sender is a public webmail domain (e.g. gmail.com)
+    which Resend strictly rejects with HTTP 403, safely use 'onboarding@resend.dev'.
+    If a verified custom domain or custom address is provided, use that.
+    For SMTP or local dev, return the configured sender.
+    """
+    if provider == "resend":
+        if _raw_configured_from and "@" in _raw_configured_from:
+            domain = _raw_configured_from.split("@")[-1].lower()
+            if domain in PUBLIC_EMAIL_DOMAINS:
+                return "onboarding@resend.dev"
+            return _raw_configured_from
+        return "onboarding@resend.dev"
+    return _raw_configured_from or "noreply@contentsignal.ai"
+
+EMAIL_FROM = get_effective_email_from("resend" if RESEND_API_KEY else "smtp")
 

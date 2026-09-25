@@ -520,6 +520,14 @@ export const api = {
   // Auth & Onboarding
   login: (data: any) => request<any>("/auth/login", { method: "POST", body: JSON.stringify(data) }),
   register: (data: any) => request<any>("/auth/register", { method: "POST", body: JSON.stringify(data) }),
+  signupInitiate: (data: { full_name: string; email: string; password: string; confirm_password: string }) =>
+    request<any>("/auth/signup-initiate", { method: "POST", body: JSON.stringify(data) }),
+  signupVerify: (data: { email: string; otp: string }) =>
+    request<any>("/auth/signup-verify", { method: "POST", body: JSON.stringify(data) }),
+  forgotPassword: (data: { email: string }) =>
+    request<any>("/auth/forgot-password", { method: "POST", body: JSON.stringify(data) }),
+  resetPassword: (data: { email: string; otp: string; new_password: string; confirm_password: string }) =>
+    request<any>("/auth/reset-password", { method: "POST", body: JSON.stringify(data) }),
   sendOtp: (data: { email: string; full_name?: string }) =>
     request<any>("/auth/send-otp", { method: "POST", body: JSON.stringify(data) }),
   verifyOtp: (data: { email: string; otp: string }) =>

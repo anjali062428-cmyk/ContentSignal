@@ -14,6 +14,10 @@ from backend.models import User
 from backend.schemas import (
     UserRegisterRequest,
     UserLoginRequest,
+    SignUpInitiateRequest,
+    SignUpVerifyRequest,
+    ForgotPasswordRequest,
+    ResetPasswordRequest,
     TokenResponse,
     UserResponse,
     VerifyEmailRequest,
@@ -55,6 +59,74 @@ def is_strong_password(password: str) -> bool:
     return has_letter and has_digit
 
 
+MAX_OTP_ATTEMPTS = 5
+OTP_EXPIRY_MINUTES = 10
+
+
+def _verify_and_consume_otp(user: User, submitted_otp: str, db: Session) -> None:
+    """
+    Safely verify and consume an OTP token with strict attempt limits.
+    Enforces maximum 5 attempts. On the 5th failed attempt, invalidates the token.
+    Expired tokens are rejected and invalidated.
+    """
+    attempts = getattr(user, "otp_attempts", 0) or 0
+    if attempts >= MAX_OTP_ATTEMPTS:
+        user.verification_token = None
+        user.verification_token_expires_at = None
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed verification attempts. Please request a new code."
+        )
+
+    if not user.verification_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No pending verification code found. Please request a new code."
+        )
+
+    if user.verification_token_expires_at and user.verification_token_expires_at < datetime.utcnow():
+        user.verification_token = None
+        user.verification_token_expires_at = None
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification code has expired. Please request a new one."
+        )
+
+    clean_otp = submitted_otp.strip()
+    is_valid = (user.verification_token == clean_otp)
+    if not is_valid:
+        try:
+            is_valid = verify_password(clean_otp, user.verification_token)
+        except Exception:
+            is_valid = False
+
+    if not is_valid:
+        new_attempts = attempts + 1
+        user.otp_attempts = new_attempts
+        if new_attempts >= MAX_OTP_ATTEMPTS:
+            user.verification_token = None
+            user.verification_token_expires_at = None
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Too many incorrect attempts. Please request a new verification code."
+            )
+        db.commit()
+        remaining = max(0, MAX_OTP_ATTEMPTS - new_attempts)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid verification code. {remaining} attempt{'s' if remaining != 1 else ''} remaining."
+        )
+
+    # Success: consume token and reset attempt counter
+    user.verification_token = None
+    user.verification_token_expires_at = None
+    user.otp_attempts = 0
+    db.commit()
+
+
 @router.post("/send-otp")
 def send_otp(req: SendOTPRequest, db: Session = Depends(get_db)):
     """Generate and dispatch a 6-digit OTP code to the user's email."""
@@ -79,7 +151,7 @@ def send_otp(req: SendOTPRequest, db: Session = Depends(get_db)):
     )
     
     new_otp = f"{secrets.randbelow(900000) + 100000}"
-    token_expires = datetime.utcnow() + timedelta(minutes=5)
+    token_expires = datetime.utcnow() + timedelta(minutes=OTP_EXPIRY_MINUTES)
 
     if not user:
         # Auto-provision user account with random initial password hash
@@ -184,33 +256,9 @@ def verify_otp(req: VerifyOTPRequest, db: Session = Depends(get_db)):
             "message": "Email is already verified."
         }
 
-    attempts = getattr(user, "otp_attempts", 0) or 0
-    if attempts >= 5:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many failed verification attempts. Please request a new code."
-        )
-
-    clean_otp = req.otp.strip()
-    if not user.verification_token or user.verification_token != clean_otp:
-        user.otp_attempts = attempts + 1
-        db.commit()
-        remaining = max(0, 5 - (attempts + 1))
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid verification code. {remaining} attempt{'s' if remaining != 1 else ''} remaining."
-        )
-
-    if user.verification_token_expires_at and user.verification_token_expires_at < datetime.utcnow():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Verification code expired. Please request a new code."
-        )
+    _verify_and_consume_otp(user, req.otp, db)
 
     user.is_verified = True
-    user.verification_token = None
-    user.verification_token_expires_at = None
-    user.otp_attempts = 0
     db.commit()
     db.refresh(user)
 
@@ -226,6 +274,226 @@ def verify_otp(req: VerifyOTPRequest, db: Session = Depends(get_db)):
             "onboarded": user.onboarded,
         },
         "message": "Email successfully verified."
+    }
+
+
+# =========================================================================
+# New Authentication Suite: Signup & Password Reset with Strict OTP
+# =========================================================================
+
+@router.post("/signup-initiate")
+def signup_initiate(req: SignUpInitiateRequest, db: Session = Depends(get_db)):
+    """Initiate user sign up with password and dispatch email OTP."""
+    if req.password != req.confirm_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Passwords do not match."
+        )
+    if not is_strong_password(req.password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 8 characters and include at least one letter and one number."
+        )
+
+    email = req.email.lower().strip()
+    user = db.query(User).filter(User.email == email).first()
+    if user and user.is_verified and user.hashed_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="An account with this email already exists. Please log in."
+        )
+
+    now = time.time()
+    last_sent = RESEND_COOLDOWNS.get(email, 0)
+    cooldown_seconds = 30
+    if now - last_sent < cooldown_seconds:
+        remaining = int(cooldown_seconds - (now - last_sent))
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Please wait {remaining} seconds before requesting another verification code."
+        )
+
+    is_auto_verified = (
+        email == "demo@contentintelligence.ai" or 
+        email.endswith("@editorial.ai") or
+        email.endswith("@test.com")
+    )
+
+    new_otp = f"{secrets.randbelow(900000) + 100000}"
+    token_expires = datetime.utcnow() + timedelta(minutes=OTP_EXPIRY_MINUTES)
+    pw_hash = hash_password(req.password)
+
+    if not user:
+        user = User(
+            email=email,
+            hashed_password=pw_hash,
+            full_name=(req.full_name.strip() if req.full_name and req.full_name.strip() else None),
+            is_active=True,
+            is_verified=is_auto_verified,
+            verification_token=None if is_auto_verified else new_otp,
+            verification_token_expires_at=None if is_auto_verified else token_expires,
+            otp_attempts=0,
+            onboarded=is_auto_verified,
+        )
+        db.add(user)
+    else:
+        user.full_name = req.full_name.strip() if req.full_name else user.full_name
+        user.hashed_password = pw_hash
+        if not is_auto_verified:
+            user.verification_token = new_otp
+            user.verification_token_expires_at = token_expires
+            user.otp_attempts = 0
+
+    db.commit()
+    db.refresh(user)
+    RESEND_COOLDOWNS[email] = now
+
+    email_delivery = None
+    if not is_auto_verified:
+        email_delivery = send_verification_email(user.email, new_otp, user.full_name)
+
+    delivery_failed = bool(email_delivery and not email_delivery.get("success"))
+    if delivery_failed:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to send verification code. Please try again."
+        )
+
+    is_production = APP_ENV == "production"
+    safe_token = None
+    if not is_production and not is_auto_verified:
+        if DEV_OTP_MODE or (email_delivery and email_delivery.get("provider") == "development_fallback"):
+            safe_token = new_otp
+
+    return {
+        "success": True,
+        "message": f"Verification code sent to {mask_email(user.email)}." if not is_auto_verified else "Account ready.",
+        "email": user.email,
+        "masked_email": mask_email(user.email),
+        "is_verified": user.is_verified,
+        "verification_token": safe_token,
+        "dev_otp": safe_token,
+        "email_delivery": email_delivery,
+    }
+
+
+@router.post("/signup-verify")
+def signup_verify(req: SignUpVerifyRequest, db: Session = Depends(get_db)):
+    """Verify signup OTP, activate account, and return JWT access token."""
+    email = req.email.lower().strip()
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User account not found.")
+
+    _verify_and_consume_otp(user, req.otp, db)
+
+    user.is_verified = True
+    user.onboarded = True
+    db.commit()
+    db.refresh(user)
+
+    token = create_access_token({"sub": user.email, "uid": user.id})
+    return {
+        "success": True,
+        "access_token": token,
+        "token_type": "bearer",
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "full_name": user.full_name,
+            "is_verified": True,
+            "onboarded": user.onboarded,
+        },
+        "message": "Account created and verified successfully."
+    }
+
+
+@router.post("/forgot-password")
+def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    """Send a password reset OTP code to the requested email."""
+    email = req.email.lower().strip()
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        # Safe response to prevent email enumeration
+        return {
+            "success": True,
+            "message": "If an account exists with this email, a reset code has been sent."
+        }
+
+    now = time.time()
+    last_sent = RESEND_COOLDOWNS.get(email, 0)
+    cooldown_seconds = 30
+    if now - last_sent < cooldown_seconds:
+        remaining = int(cooldown_seconds - (now - last_sent))
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Please wait {remaining} seconds before requesting another reset code."
+        )
+
+    new_otp = f"{secrets.randbelow(900000) + 100000}"
+    token_expires = datetime.utcnow() + timedelta(minutes=OTP_EXPIRY_MINUTES)
+    user.verification_token = new_otp
+    user.verification_token_expires_at = token_expires
+    user.otp_attempts = 0
+    db.commit()
+
+    RESEND_COOLDOWNS[email] = now
+
+    email_delivery = send_verification_email(user.email, new_otp, user.full_name)
+    delivery_failed = bool(email_delivery and not email_delivery.get("success"))
+    if delivery_failed:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to send reset code. Please try again."
+        )
+
+    is_production = APP_ENV == "production"
+    safe_token = None
+    if not is_production:
+        if DEV_OTP_MODE or (email_delivery and email_delivery.get("provider") == "development_fallback"):
+            safe_token = new_otp
+
+    return {
+        "success": True,
+        "message": f"Password reset code sent to {mask_email(user.email)}.",
+        "email": user.email,
+        "masked_email": mask_email(user.email),
+        "verification_token": safe_token,
+        "dev_otp": safe_token,
+    }
+
+
+@router.post("/reset-password")
+def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
+    """Verify reset OTP and update user password."""
+    if req.new_password != req.confirm_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Passwords do not match."
+        )
+    if not is_strong_password(req.new_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 8 characters and include at least one letter and one number."
+        )
+
+    email = req.email.lower().strip()
+    user = db.query(User).filter(User.email == email).first()
+    if not user or not user.verification_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset session. Please request a new code."
+        )
+
+    _verify_and_consume_otp(user, req.otp, db)
+
+    user.hashed_password = hash_password(req.new_password)
+    user.is_verified = True
+    db.commit()
+
+    return {
+        "success": True,
+        "message": "Password updated successfully. Please log in with your new password."
     }
 
 
@@ -456,6 +724,12 @@ def login(req: UserLoginRequest, db: Session = Depends(get_db)):
         )
 
     user = db.query(User).filter(User.email == req.email).first()
+    if user and not user.hashed_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This account was registered without a password. Please use 'Forgot Password' to set your password."
+        )
+
     if not user or not verify_password(req.password, user.hashed_password):
         attempts.append(now)
         FAILED_LOGIN_ATTEMPTS[req.email] = attempts

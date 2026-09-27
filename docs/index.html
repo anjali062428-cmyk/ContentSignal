@@ -954,7 +954,7 @@
     <div class="abstract-box" id="abstract">
       <div class="abstract-title">Abstract</div>
       <p class="abstract-text">
-        Content teams and digital publishers face a severe operational bottleneck when managing thousands of published articles under finite editorial bandwidth. This paper investigates whether supervised machine learning combined with leakage-aware search telemetry and content signals can reliably prioritize pages in performance decay for human editorial review on entirely unseen client domains. Utilizing a verified multi-tenant dataset of 30,000 pages across 32 enterprise clients, we enforce strict six-tier leakage isolation, quarantining nine proprietary platform columns and isolating direct target-construction components. Evaluating strictly on six held-out client domains (3,381 pages), a Gradient Boosting classifier achieves the strongest discrimination with a ROC-AUC of 0.6945, PR-AUC of 0.6791, and an operational Precision@100 of 72.0%—more than double the transparent heuristic baseline of 33.0%. These model probabilities are integrated into a 0–100 Content Opportunity Scoring engine paired with deterministic reason codes and prescriptive editorial directives (<span class="badge badge-rose">REFRESH</span>, <span class="badge badge-amber">OPTIMIZE</span>, <span class="badge badge-emerald">PROTECT</span>, <span class="badge badge-primary">INVESTIGATE</span>, <span class="badge badge-neutral">MONITOR</span>, <code>MERGE</code>, <code>REWRITE</code>), delivering a safe decision-support system that maximizes editorial yield without making ungrounded causal claims.
+        Content teams and digital publishers face a severe operational bottleneck when managing thousands of published articles under finite editorial bandwidth. This paper investigates whether supervised machine learning combined with leakage-aware search telemetry and content signals can reliably prioritize pages in performance decay for human editorial review on entirely unseen client domains. Utilizing a verified multi-tenant dataset of 30,000 pages across 32 enterprise clients, we enforce strict six-tier leakage isolation, quarantining nine proprietary platform columns and isolating direct target-construction components. Evaluating strictly on six held-out client groups (3,381 pages), a Gradient Boosting classifier achieves the strongest discrimination with a ROC-AUC of 0.6945, PR-AUC of 0.6791, and an observed Precision@100 of 72.0% (compared to 33.0% for the transparent heuristic baseline). These model probabilities are integrated into a 0–100 Content Opportunity Scoring engine paired with deterministic reason codes and prescriptive editorial directives (<span class="badge badge-rose">REFRESH</span>, <span class="badge badge-amber">OPTIMIZE</span>, <span class="badge badge-emerald">PROTECT</span>, <span class="badge badge-primary">INVESTIGATE</span>, <span class="badge badge-neutral">MONITOR</span>, <code>MERGE</code>, <code>REWRITE</code>), delivering a decision-support system designed to assist editorial review prioritization without making ungrounded causal claims.
       </p>
       <div class="abstract-keywords">
         <strong>Keywords:</strong> Applied Machine Learning, Content Opportunity Scoring, Target Leakage Prevention, Client-Group Holdout, Decision Support Systems, Precision@K, SEO Telemetry Prioritization.
@@ -1027,11 +1027,11 @@
         </p>
         <ul>
           <li><strong>Disproportionate Attention to High-Volume Outliers:</strong> Sorting by raw traffic loss causes editorial teams to repeatedly inspect high-traffic flagship URLs undergoing minor percentage fluctuations, while ignoring mid-tier pages with high recovery elasticity.</li>
-          <li><strong>False Alarms on Long-Tail Zero-Demand Pages:</strong> Flagging low-traffic tail pages that have natural seasonal volatility wastes specialist hours on articles with zero commercial leverage.</li>
+          <li><strong>False Alarms on Long-Tail Zero-Demand Pages:</strong> Flagging low-traffic tail pages that have natural seasonal volatility diverts specialist review hours toward articles with minimal organic search visibility.</li>
           <li><strong>Opaque Proprietary Scoring:</strong> Many commercial SEO tools provide composite "health scores" without documenting the underlying mathematical formula or providing deterministic reasons, leaving editorial writers confused regarding what edits to make.</li>
         </ul>
         <p>
-          If an editorial team has a review budget of <strong>50 to 100 pages per cycle</strong>, they require a ranked review queue where the top percentiles possess high genuine decay prevalence, clear explanations, and prescriptive action directives.
+          If an editorial team has a review budget of <strong>50 to 100 pages per cycle</strong>, they require a ranked review queue where the top percentiles possess a high proportion of matching decay opportunities, clear explanations, and prescriptive action directives.
         </p>
       </section>
 
@@ -1042,7 +1042,7 @@
           <h2>Data Architecture, Scale & Contracts</h2>
         </div>
         <p>
-          This research was conducted using the <strong>FlyRank Machine Learning Internship dataset</strong>. The dataset consists of an anonymized starter slice (<code>data/raw/content_refresh_anonymized.csv</code>) supplemented by schema specifications from the enterprise warehouse release (<code>FlyRank/internship-warehouse</code>).
+          This research was conducted using the <strong>FlyRank Machine Learning Internship dataset</strong>. The analysis uses an anonymized multi-tenant starter slice supplemented by schema specifications from the enterprise warehouse release.
         </p>
         
         <h3>3.1 Dataset Inventory & Distributions</h3>
@@ -1363,12 +1363,12 @@
           </table>
         </div>
         <p>
-          The six completely held-out client domains are: <code>client_8b940be7fb</code>, <code>client_bbb965ab0c</code>, <code>client_9400f1b21c</code>, <code>client_a88a7902cb</code>, <code>client_8527a891e2</code>, and <code>client_9f14025af0</code>.
+          The evaluation was conducted on six held-out client groups/domains comprising 3,381 disjoint pages.
         </p>
 
         <div class="callout callout-info">
           <div class="callout-title">Validation Discipline Note</div>
-          Because the evaluation set consists entirely of pages from unseen domains, the reported metrics reflect true <strong>cross-tenant generalizability</strong>. This setup tests whether the model has learned generalizable search telemetry patterns rather than domain-specific memorization.
+          Because the evaluation set consists entirely of pages from unseen domains, the reported metrics evaluate performance across distinct client groups. The evaluation provides evidence of model performance on the held-out client groups used in this study.
         </div>
       </section>
 
@@ -1659,9 +1659,9 @@
           Within this evaluation setup, <strong>Gradient Boosting</strong> achieved the strongest overall combination of the reported evaluation metrics and was therefore selected for the production benchmark. The decision rests on three operational realities:
         </p>
         <ol>
-          <li><strong>Highest Cross-Domain Discrimination:</strong> Achieving <strong>0.6945 ROC-AUC</strong> and <strong>0.6791 PR-AUC</strong> on completely unseen client domains proves that Gradient Boosting minimizes general classification error better than linear and bagging architectures.</li>
+          <li><strong>Cross-Domain Discrimination:</strong> Achieving <strong>0.6945 ROC-AUC</strong> and <strong>0.6791 PR-AUC</strong> on the held-out client groups provides evidence that Gradient Boosting achieved stronger classification performance on these holdout groups than the linear and bagging architectures evaluated.</li>
           <li><strong>Highest Deep Review Queue Precision:</strong> While Logistic Regression performed well on the initial 20 items (P@20 = 75.0%), Gradient Boosting proved far more resilient as queue depth expanded, achieving <strong>68.0% Precision@50</strong> and <strong>72.0% Precision@100</strong> (compared to 48.0% for Random Forest and 33.0% for Heuristic Baseline).</li>
-          <li><strong>Superior Editorial Return on Investment:</strong> In an editorial review queue of 100 pages, Gradient Boosting guarantees that <strong>72 pages are genuine decay candidates</strong>. The heuristic baseline yields only 33 valid pages—forcing editors to waste two-thirds of their work hours investigating healthy or stable content.</li>
+          <li><strong>Editorial Queue Prioritization:</strong> In an editorial review queue of 100 pages, Gradient Boosting achieved 72.0% Precision@100 in this evaluation, meaning that 72 of the top 100 ranked items matched the positive proxy label (compared to 33 identified by the heuristic baseline)—demonstrating a substantially higher concentration of candidate pages within the top-ranked review set.</li>
         </ol>
       </section>
 
@@ -1718,7 +1718,7 @@
                 <td>5</td>
                 <td><code>avg_position</code></td>
                 <td class="num-cell"><strong>0.0617</strong></td>
-                <td>Organic Google position. Striking zone pages (ranks 4–20) exhibit highest volatility.</td>
+                <td>Recorded search position. Striking zone pages (ranks 4–20) exhibit highest volatility.</td>
               </tr>
               <tr>
                 <td>6</td>
@@ -1748,7 +1748,7 @@
                 <td>10</td>
                 <td><code>clicks_90d</code></td>
                 <td class="num-cell">0.0224</td>
-                <td>Trailing click volume reflecting proven user demand.</td>
+                <td>Trailing click volume reflecting observed user demand.</td>
               </tr>
             </tbody>
           </table>
@@ -2079,10 +2079,10 @@
           The experimental results yield important operational insights for applied machine learning in marketing and publishing:
         </p>
         <p>
-          <strong>Why Precision@K is the Essential Metric:</strong> Standard machine learning benchmarks prioritize global metrics such as overall accuracy or ROC-AUC. However, editorial teams never consume an entire dataset; they consume a fixed weekly review queue. A model with high overall recall that litters the top 50 recommendations with false alarms is useless. By attaining <strong>72.0% Precision@100</strong>, Gradient Boosting ensures that nearly three out of every four articles inspected are verified decay opportunities.
+          <strong>Why Precision@K is the Essential Metric:</strong> Standard machine learning benchmarks prioritize global metrics such as overall accuracy or ROC-AUC. However, editorial teams never consume an entire dataset; they consume a fixed weekly review queue. A model with high overall recall that litters the top 50 recommendations with false alarms is of limited practical value. Gradient Boosting achieved 72.0% Precision@100 in this evaluation, meaning that 72 of the top 100 ranked items matched the positive proxy label.
         </p>
         <p>
-          <strong>Generalizability Across Heterogeneous Domains:</strong> Many web algorithms overfit to specific site templates. Because our model was tested strictly on six unseen client domains, the 0.6945 ROC-AUC indicates that pre-intervention behavioral dynamics (such as impression consistency and position elasticity) generalize across completely different websites and publishing cadences.
+          <strong>Performance Across Heterogeneous Domains:</strong> Many web models overfit to specific site templates. Because our model was tested on six held-out client groups, the 0.6945 ROC-AUC indicates that pre-intervention behavioral dynamics (such as impression consistency and position elasticity) provide informative ranking signals across distinct website structures in this evaluation.
         </p>
       </section>
 
@@ -2136,7 +2136,7 @@
           <h2>Conclusion, Acknowledgements & Data Credit</h2>
         </div>
         <p>
-          The <strong>ContentSignal</strong> framework demonstrates that leakage-aware machine learning combined with behavioral search telemetry provides a potent decision-support system for digital content management. By isolating proprietary aggregates, enforcing client-group holdout validation, and optimizing for operational Precision@K, the platform achieves a verified <strong>72.0% Precision@100</strong> on unseen enterprise domains. Integrated with transparent reason codes and deterministic editorial directives, ContentSignal transforms noisy search data into actionable, high-yield editorial interventions.
+          The <strong>ContentSignal</strong> framework demonstrates that leakage-aware machine learning combined with behavioral search telemetry provides a practical decision-support system for digital content management. By isolating proprietary aggregates, enforcing client-group holdout validation, and optimizing for operational Precision@K, the platform achieved an observed <strong>72.0% Precision@100</strong> on the held-out enterprise domains in this study. Integrated with transparent reason codes and deterministic editorial directives, ContentSignal transforms noisy search telemetry into structured, evidence-based editorial review priorities.
         </p>
 
         <h3>Data Credit & Educational Context</h3>

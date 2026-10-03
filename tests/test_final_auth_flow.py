@@ -461,3 +461,176 @@ def test_smtp_configuration_parameters_verified():
         # Password and sensitive secrets are NEVER exposed in status
         assert "secret_pass_1234" not in str(status)
 
+
+def test_resend_https_api_dispatch_called_and_smtp_not_touched():
+    """Verify that EMAIL_PROVIDER=resend executes HTTPS REST API over port 443 and NEVER touches SMTP."""
+    import httpx
+    import smtplib
+
+    with patch("backend.email_service.EMAIL_PROVIDER", "resend"), \
+         patch("backend.email_service.RESEND_API_KEY", "re_live_test_dummy_key_123"), \
+         patch("backend.email_service.SMTP_HOST", "smtp.gmail.com"), \
+         patch("backend.email_service.SMTP_PORT", 587), \
+         patch("backend.email_service.SMTP_USER", "unused_smtp@gmail.com"), \
+         patch("backend.email_service.SMTP_PASSWORD", "unused_pass"), \
+         patch("backend.email_service.EMAIL_FROM", "noreply@contentsignal.ai"), \
+         patch("backend.email_service.EMAIL_FROM_NAME", "ContentSignal"), \
+         patch("smtplib.SMTP") as mock_smtp, \
+         patch("smtplib.SMTP_SSL") as mock_smtp_ssl, \
+         patch("httpx.Client.post") as mock_http_post:
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"id": "msg_resend_prod_123"}
+        mock_http_post.return_value = mock_resp
+
+        from backend.email_service import send_verification_email
+        res = send_verification_email("customer@example.com", "882314", "Jane Doe")
+
+        # 1. Assert Resend success response
+        assert res["success"] is True
+        assert res["provider"] == "resend"
+        assert res["delivery_id"] == "msg_resend_prod_123"
+
+        # 2. Assert HTTP call was sent to Resend REST API (HTTPS port 443)
+        assert mock_http_post.called
+        call_url = mock_http_post.call_args[0][0]
+        call_headers = mock_http_post.call_args[1]["headers"]
+        call_payload = mock_http_post.call_args[1]["json"]
+
+        assert call_url == "https://api.resend.com/emails"
+        assert call_headers["Authorization"] == "Bearer re_live_test_dummy_key_123"
+        assert call_payload["to"] == ["customer@example.com"]
+        assert "ContentSignal <noreply@contentsignal.ai>" in call_payload["from"]
+        assert "882314" in call_payload["text"]
+
+        # 3. Assert SMTP was strictly NEVER touched/attempted
+        mock_smtp.assert_not_called()
+        mock_smtp_ssl.assert_not_called()
+
+
+def test_resend_sender_bracketed_name_handling():
+    """Verify bracketed names with public or custom domains resolve safely."""
+    from backend.config import get_effective_email_from
+
+    # Bracketed Gmail name -> fallback to onboarding@resend.dev
+    with patch("backend.config._raw_configured_from", "ContentSignal Support <anjali.56bn@gmail.com>"):
+        assert get_effective_email_from("resend") == "onboarding@resend.dev"
+
+    # Bracketed custom domain -> preserve clean domain
+    with patch("backend.config._raw_configured_from", "ContentSignal Support <team@contentsignal.ai>"):
+        assert get_effective_email_from("resend") == "team@contentsignal.ai"
+
+
+def test_verify_resend_endpoint_success():
+    """Test /api/auth/verify-resend with delivered@resend.dev mock success."""
+    mock_client = MagicMock()
+    mock_client.__enter__.return_value = mock_client
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"id": "re_delivered_msg_777"}
+    mock_client.post.return_value = mock_resp
+
+    with patch("backend.email_service.RESEND_API_KEY", "re_mock_test_key_valid"), \
+         patch("backend.email_service.httpx.Client", return_value=mock_client):
+
+        res = client.get("/api/auth/verify-resend")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["success"] is True
+        assert data["code"] == "OK"
+        assert data["delivery_id"] == "re_delivered_msg_777"
+        assert data["recipient"] == "delivered@resend.dev"
+        assert "re_mock_test_key_valid" not in str(data)
+
+        # Confirm exact URL and headers
+        call_url = mock_client.post.call_args[0][0]
+        call_headers = mock_client.post.call_args[1]["headers"]
+        call_json = mock_client.post.call_args[1]["json"]
+        assert call_url == "https://api.resend.com/emails"
+        assert call_headers["Authorization"] == "Bearer re_mock_test_key_valid"
+        assert call_json["to"] == ["delivered@resend.dev"]
+
+
+def test_verify_resend_endpoint_handles_403_safely():
+    """Test /api/auth/verify-resend reports Resend 403 error without leaking credentials."""
+    mock_client = MagicMock()
+    mock_client.__enter__.return_value = mock_client
+    mock_resp = MagicMock()
+    mock_resp.status_code = 403
+    mock_resp.json.return_value = {
+        "statusCode": 403,
+        "message": "You can only send testing emails to your own email address",
+        "name": "validation_error"
+    }
+    mock_client.post.return_value = mock_resp
+
+    with patch("backend.email_service.RESEND_API_KEY", "re_mock_test_key_valid"), \
+         patch("backend.email_service.httpx.Client", return_value=mock_client):
+
+        res = client.get("/api/auth/verify-resend")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["success"] is False
+        assert data["status_code"] == 403
+        assert data["code"] == "RESEND_403"
+        assert "You can only send testing emails" in data["message"]
+        assert "re_mock_test_key_valid" not in str(data)
+
+
+def test_send_otp_propagates_resend_error_headers_safely():
+    """Verify that when Resend returns 403, /api/auth/send-otp sets diagnostic headers without leaking in body."""
+    mock_client = MagicMock()
+    mock_client.__enter__.return_value = mock_client
+    mock_resp = MagicMock()
+    mock_resp.status_code = 403
+    mock_resp.json.return_value = {
+        "statusCode": 403,
+        "message": "You can only send testing emails to your own email address (owner@gmail.com).",
+        "name": "validation_error"
+    }
+    mock_client.post.return_value = mock_resp
+
+    with patch("backend.email_service.EMAIL_PROVIDER", "resend"), \
+         patch("backend.email_service.RESEND_API_KEY", "re_mock_test_key_123"), \
+         patch("backend.email_service.httpx.Client", return_value=mock_client):
+
+        res = client.post("/api/auth/send-otp", json={"email": "unverified_stranger@example.com"})
+        assert res.status_code == 500
+        # Body detail stays clean without status code leaking to public client
+        assert "Unable to send verification code" in res.json()["detail"]
+        assert "403" not in res.json()["detail"]
+        # Diagnostic headers contain the structured error
+        assert res.headers.get("x-error-code") == "RESEND_403"
+        assert "owner@gmail.com" in res.headers.get("x-error-reason", "")
+        # API key is NEVER leaked in body or headers
+        assert "re_mock_test_key_123" not in res.text
+        assert "re_mock_test_key_123" not in str(res.headers)
+
+
+def test_test_email_allows_delivered_resend_dev_in_production():
+    """Verify delivered@resend.dev is permitted on /api/auth/test-email in production."""
+    with patch("backend.routers.auth.APP_ENV", "production"), \
+         patch("backend.routers.auth.DEV_OTP_MODE", False), \
+         patch("backend.email_service.send_verification_email") as mock_send:
+        mock_send.return_value = {
+            "success": True,
+            "provider": "resend",
+            "status_code": 200,
+            "delivery_id": "test_delivered_123",
+            "code": "OK",
+            "message": "Verification email dispatched via Resend.",
+        }
+
+        # 1. delivered@resend.dev is permitted
+        res = client.post("/api/auth/test-email", json={"email": "delivered@resend.dev"})
+        assert res.status_code == 200
+        assert res.json()["success"] is True
+        assert res.json()["delivery_id"] == "test_delivered_123"
+
+        # 2. Arbitrary email is blocked in production
+        res_blocked = client.post("/api/auth/test-email", json={"email": "stranger@gmail.com"})
+        assert res_blocked.status_code == 403
+
+
+

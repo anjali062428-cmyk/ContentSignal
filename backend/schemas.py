@@ -43,15 +43,20 @@ class OnboardingRequest(BaseModel):
 
 
 class UserLoginRequest(BaseModel):
-    email: EmailStr
+    email: Optional[str] = None
+    identifier: Optional[str] = None
     password: str
+    remember_me: Optional[bool] = False
 
 
 class SignUpInitiateRequest(BaseModel):
     full_name: str
     email: EmailStr
+    mobile_number: Optional[str] = None
+    country_code: Optional[str] = "+91"
     password: str = Field(min_length=8)
     confirm_password: str = Field(min_length=8)
+    terms_accepted: Optional[bool] = True
 
 
 class SignUpVerifyRequest(BaseModel):
@@ -59,12 +64,43 @@ class SignUpVerifyRequest(BaseModel):
     otp: str = Field(min_length=6, max_length=6)
 
 
-class ForgotPasswordRequest(BaseModel):
+class VerifyMobileOTPRequest(BaseModel):
+    identifier: str
+    otp: str = Field(min_length=6, max_length=6)
+
+
+class ResendMobileOTPRequest(BaseModel):
+    identifier: str
+
+
+class ChangeContactRequest(BaseModel):
+    current_email: EmailStr
+    new_email: Optional[EmailStr] = None
+    new_mobile: Optional[str] = None
+    country_code: Optional[str] = "+91"
+
+
+class LoginOTPInitiateRequest(BaseModel):
+    identifier: str
+
+
+class LoginOTPVerifyRequest(BaseModel):
+    identifier: str
+    otp: str = Field(min_length=6, max_length=6)
+
+
+class TestEmailRequest(BaseModel):
     email: EmailStr
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: Optional[str] = None
+    identifier: Optional[str] = None
 
 
 class ResetPasswordRequest(BaseModel):
-    email: EmailStr
+    email: Optional[str] = None
+    identifier: Optional[str] = None
     otp: str = Field(min_length=6, max_length=6)
     new_password: str = Field(min_length=8)
     confirm_password: str = Field(min_length=8)

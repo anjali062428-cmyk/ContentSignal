@@ -189,61 +189,86 @@ class ResendProvider(BaseEmailProvider):
             return {
                 "success": False,
                 "provider": "resend",
+                "status_code": 400,
                 "code": "RESEND_NOT_CONFIGURED",
                 "delivery_id": None,
                 "message": "RESEND_API_KEY is not configured.",
             }
 
-        effective_from = get_effective_email_from("resend")
+        clean_key = resend_key.strip().strip("'\"")
+        resend_sender = getattr(sys.modules[__name__], "EMAIL_FROM", "")
+        effective_from = get_effective_email_from("resend", custom_sender=resend_sender)
         from_name = sys.modules[__name__].EMAIL_FROM_NAME
         sender = f"{from_name} <{effective_from}>" if from_name else effective_from
+        clean_to = to_email.strip()
         url = "https://api.resend.com/emails"
         headers = {
-            "Authorization": f"Bearer {resend_key.strip()}",
+            "Authorization": f"Bearer {clean_key}",
             "Content-Type": "application/json",
         }
         payload = {
             "from": sender,
-            "to": [to_email],
+            "to": [clean_to],
             "subject": subject,
             "html": html,
             "text": text,
         }
 
-        logger.info("[RESEND] Sending email to %s via %s", mask_email_address(to_email), effective_from)
+        masked_to = mask_email_address(clean_to)
+        logger.info("[RESEND] Sending email to %s via %s", masked_to, effective_from)
         try:
             with httpx.Client(timeout=10.0) as client:
                 response = client.post(url, headers=headers, json=payload)
                 if response.status_code in (200, 201):
                     data = response.json()
                     delivery_id = data.get("id", "resend_ok")
-                    logger.info("[RESEND] Delivery SUCCESS to %s (id: %s)", mask_email_address(to_email), delivery_id)
+                    logger.info("[RESEND] Delivery SUCCESS to %s (id: %s)", masked_to, delivery_id)
                     return {
                         "success": True,
                         "provider": "resend",
+                        "status_code": response.status_code,
                         "delivery_id": delivery_id,
                         "message": "Verification email dispatched via Resend.",
                     }
                 else:
-                    err_detail = response.text[:200]
-                    if response.status_code == 403 and ("testing email" in err_detail.lower() or "verify" in err_detail.lower() or "domain" in err_detail.lower()):
-                        logger.error(
-                            "[RESEND] 403 Domain Restriction: Test sender 'onboarding@resend.dev' can only deliver to the account owner's email address. To send to any recipient, verify your custom domain at https://resend.com/domains, or use Gmail SMTP."
+                    resend_status = response.status_code
+                    resend_msg = ""
+                    try:
+                        resp_json = response.json()
+                        resend_msg = resp_json.get("message") or resp_json.get("name") or ""
+                    except Exception:
+                        pass
+                    if not resend_msg:
+                        resend_msg = response.text[:250]
+
+                    if resend_status == 403 and ("testing email" in resend_msg.lower() or "verify" in resend_msg.lower() or "domain" in resend_msg.lower() or "own email" in resend_msg.lower()):
+                        safe_reason = (
+                            f"Resend 403 Domain Restriction: Test sender 'onboarding@resend.dev' can only deliver to the account owner's email address or 'delivered@resend.dev'. "
+                            f"Resend returned: '{resend_msg}'. To send to any recipient, verify your custom domain at https://resend.com/domains."
                         )
+                    elif resend_status == 401:
+                        safe_reason = f"Resend 401 Unauthorized: Invalid API key ({resend_msg}). Please check the RESEND_API_KEY environment variable in Render."
+                    elif resend_status == 422:
+                        safe_reason = f"Resend 422 Validation Error: {resend_msg}"
                     else:
-                        logger.error("[RESEND] API rejected dispatch to %s (HTTP %s): %s", mask_email_address(to_email), response.status_code, err_detail)
+                        safe_reason = f"Resend API error (HTTP {resend_status}): {resend_msg}"
+
+                    logger.error("[RESEND] Dispatch failed to %s | HTTP %s | %s", masked_to, resend_status, safe_reason)
                     return {
                         "success": False,
                         "provider": "resend",
-                        "code": f"RESEND_{response.status_code}",
+                        "status_code": resend_status,
+                        "code": f"RESEND_{resend_status}",
                         "delivery_id": None,
-                        "message": f"Resend API error: HTTP {response.status_code} - {err_detail}",
+                        "message": safe_reason,
+                        "resend_error": resend_msg,
                     }
         except Exception as e:
-            logger.error("[RESEND] Network exception during email dispatch to %s: %s", mask_email_address(to_email), type(e).__name__)
+            logger.error("[RESEND] Network exception during email dispatch to %s: %s", masked_to, type(e).__name__)
             return {
                 "success": False,
                 "provider": "resend",
+                "status_code": 500,
                 "code": "RESEND_NETWORK_ERROR",
                 "delivery_id": None,
                 "message": f"Network error connecting to Resend: {str(e)}",
@@ -548,6 +573,84 @@ def verify_smtp_connection() -> Dict[str, Any]:
                 pass
 
 
+def verify_resend_connection() -> Dict[str, Any]:
+    """
+    Test Resend API integration using Resend's documented test recipient ('delivered@resend.dev').
+    Determines if API key, HTTPS egress over port 443, and sender configuration are functional.
+    Never exposes API keys, credentials, or secrets.
+    """
+    resend_key = getattr(sys.modules[__name__], "RESEND_API_KEY", "")
+    if not resend_key:
+        return {
+            "success": False,
+            "provider": "resend",
+            "status_code": 400,
+            "code": "RESEND_NOT_CONFIGURED",
+            "message": "RESEND_API_KEY is not configured in environment.",
+        }
+
+    clean_key = resend_key.strip().strip("'\"")
+    from_sender = get_effective_email_from("resend", custom_sender=getattr(sys.modules[__name__], "EMAIL_FROM", ""))
+    from_name = getattr(sys.modules[__name__], "EMAIL_FROM_NAME", "ContentSignal")
+    sender_header = f"{from_name} <{from_sender}>" if from_name else from_sender
+
+    test_payload = {
+        "from": sender_header,
+        "to": ["delivered@resend.dev"],
+        "subject": "ContentSignal Resend Pre-flight Diagnostic",
+        "html": "<p>ContentSignal Resend integration diagnostic test.</p>",
+        "text": "ContentSignal Resend integration diagnostic test.",
+    }
+    headers = {
+        "Authorization": f"Bearer {clean_key}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.post("https://api.resend.com/emails", headers=headers, json=test_payload)
+            if resp.status_code in (200, 201):
+                data = resp.json()
+                return {
+                    "success": True,
+                    "provider": "resend",
+                    "status_code": resp.status_code,
+                    "code": "OK",
+                    "delivery_id": data.get("id"),
+                    "recipient": "delivered@resend.dev",
+                    "sender": sender_header,
+                    "message": "Resend API connection and test dispatch to delivered@resend.dev succeeded.",
+                }
+            else:
+                err_msg = ""
+                try:
+                    err_json = resp.json()
+                    err_msg = err_json.get("message") or err_json.get("name") or ""
+                except Exception:
+                    pass
+                if not err_msg:
+                    err_msg = resp.text[:250]
+
+                return {
+                    "success": False,
+                    "provider": "resend",
+                    "status_code": resp.status_code,
+                    "code": f"RESEND_{resp.status_code}",
+                    "recipient": "delivered@resend.dev",
+                    "sender": sender_header,
+                    "message": f"Resend API returned HTTP {resp.status_code}: {err_msg}",
+                    "resend_error": err_msg,
+                }
+    except Exception as e:
+        return {
+            "success": False,
+            "provider": "resend",
+            "status_code": 500,
+            "code": "RESEND_NETWORK_ERROR",
+            "message": f"Network error connecting to https://api.resend.com/emails: {str(e)}",
+        }
+
+
 def test_send_email(to_email: str) -> Dict[str, Any]:
     """
     Phase 24: Diagnostic endpoint helper to test sending a real verification email.
@@ -558,7 +661,9 @@ def test_send_email(to_email: str) -> Dict[str, Any]:
     return {
         "success": res.get("success", False),
         "provider": res.get("provider", "unknown"),
+        "status_code": res.get("status_code"),
         "delivery_id": res.get("delivery_id"),
         "code": res.get("code", "OK" if res.get("success") else "DELIVERY_FAILED"),
         "message": res.get("message", "Test dispatch completed."),
+        "resend_error": res.get("resend_error"),
     }

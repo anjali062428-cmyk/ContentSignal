@@ -92,15 +92,22 @@ def get_effective_email_from(provider: str, custom_sender: Optional[str] = None)
             ""
         ).strip()
 
+    raw_clean = raw_from.strip()
+    if "<" in raw_clean and ">" in raw_clean:
+        import re
+        match = re.search(r"<([^>]+)>", raw_clean)
+        if match:
+            raw_clean = match.group(1).strip()
+
     if provider == "resend":
-        if raw_from and "@" in raw_from:
-            domain = raw_from.split("@")[-1].lower()
+        if raw_clean and "@" in raw_clean:
+            domain = raw_clean.split("@")[-1].strip().lower()
             if domain in PUBLIC_EMAIL_DOMAINS:
                 return "onboarding@resend.dev"
-            return raw_from
+            return raw_clean
         return "onboarding@resend.dev"
 
-    return raw_from or "noreply@contentsignal.ai"
+    return raw_clean or "noreply@contentsignal.ai"
 
 def _determine_initial_provider() -> str:
     pref = EMAIL_PROVIDER.strip().lower()

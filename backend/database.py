@@ -51,6 +51,20 @@ def ensure_columns():
                 if "onboarded" not in user_cols:
                     conn.execute(text("ALTER TABLE users ADD COLUMN onboarded BOOLEAN DEFAULT 1"))
                     conn.execute(text("UPDATE users SET onboarded = 1 WHERE onboarded IS NULL"))
+                if "mobile_number" not in user_cols:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN mobile_number VARCHAR(32)"))
+                if "country_code" not in user_cols:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN country_code VARCHAR(8) DEFAULT '+91'"))
+                if "email_verified" not in user_cols:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN email_verified BOOLEAN DEFAULT 1"))
+                    conn.execute(text("UPDATE users SET email_verified = 1 WHERE email_verified IS NULL"))
+                if "mobile_otp_token" not in user_cols:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN mobile_otp_token VARCHAR(255)"))
+                if "mobile_otp_expires_at" not in user_cols:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN mobile_otp_expires_at DATETIME"))
+                if "mobile_otp_attempts" not in user_cols:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN mobile_otp_attempts INTEGER DEFAULT 0"))
+                conn.commit()
 
             # 3. Datasets table migrations
             if "datasets" in tables:

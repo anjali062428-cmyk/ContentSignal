@@ -41,7 +41,14 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
   if (!res.ok) {
     const errData = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(errData.detail || `Request failed with status ${res.status}`);
+    const errorMsg = typeof errData.detail === "string"
+      ? errData.detail
+      : (errData.detail?.message || errData.message || `Request failed with status ${res.status}`);
+    const err: any = new Error(errorMsg);
+    err.code = errData.detail?.code || errData.code;
+    err.status = res.status;
+    err.detail = errData.detail;
+    throw err;
   }
 
   return res.json();
@@ -518,16 +525,46 @@ export const api = {
   },
 
   // Auth & Onboarding
-  login: (data: any) => request<any>("/auth/login", { method: "POST", body: JSON.stringify(data) }),
+  login: (data: { identifier?: string; email?: string; password: string; remember_me?: boolean }) =>
+    request<any>("/auth/login", { method: "POST", body: JSON.stringify(data) }),
   register: (data: any) => request<any>("/auth/register", { method: "POST", body: JSON.stringify(data) }),
-  signupInitiate: (data: { full_name: string; email: string; password: string; confirm_password: string }) =>
-    request<any>("/auth/signup-initiate", { method: "POST", body: JSON.stringify(data) }),
+  signupInitiate: (data: {
+    full_name: string;
+    email: string;
+    mobile_number?: string;
+    country_code?: string;
+    password: string;
+    confirm_password: string;
+    terms_accepted?: boolean;
+  }) => request<any>("/auth/signup-initiate", { method: "POST", body: JSON.stringify(data) }),
   signupVerify: (data: { email: string; otp: string }) =>
     request<any>("/auth/signup-verify", { method: "POST", body: JSON.stringify(data) }),
-  forgotPassword: (data: { email: string }) =>
+  signupVerifyEmail: (data: { email: string; otp: string }) =>
+    request<any>("/auth/signup-verify-email", { method: "POST", body: JSON.stringify(data) }),
+  signupVerifyMobile: (data: { email: string; otp: string }) =>
+    request<any>("/auth/signup-verify-mobile", { method: "POST", body: JSON.stringify(data) }),
+  resendEmailOtp: (data: { email: string }) =>
+    request<any>("/auth/resend-email-otp", { method: "POST", body: JSON.stringify(data) }),
+  resendMobileOtp: (data: { email: string }) =>
+    request<any>("/auth/resend-mobile-otp", { method: "POST", body: JSON.stringify(data) }),
+  changeContact: (data: { email: string; new_email?: string; new_mobile?: string; country_code?: string }) =>
+    request<any>("/auth/change-contact", { method: "POST", body: JSON.stringify(data) }),
+  loginOtpInitiate: (data: { identifier: string }) =>
+    request<any>("/auth/login-otp-initiate", { method: "POST", body: JSON.stringify(data) }),
+  loginOtpVerify: (data: { identifier: string; otp: string }) =>
+    request<any>("/auth/login-otp-verify", { method: "POST", body: JSON.stringify(data) }),
+  forgotPassword: (data: { identifier?: string; email?: string }) =>
     request<any>("/auth/forgot-password", { method: "POST", body: JSON.stringify(data) }),
-  resetPassword: (data: { email: string; otp: string; new_password: string; confirm_password: string }) =>
-    request<any>("/auth/reset-password", { method: "POST", body: JSON.stringify(data) }),
+  resetPassword: (data: {
+    identifier?: string;
+    email?: string;
+    otp: string;
+    new_password: string;
+    confirm_password: string;
+  }) => request<any>("/auth/reset-password", { method: "POST", body: JSON.stringify(data) }),
+  getEmailStatus: () => request<any>("/auth/email-status"),
+  testEmail: (data: { to_email: string }) =>
+    request<any>("/auth/test-email", { method: "POST", body: JSON.stringify(data) }),
   sendOtp: (data: { email: string; full_name?: string }) =>
     request<any>("/auth/send-otp", { method: "POST", body: JSON.stringify(data) }),
   verifyOtp: (data: { email: string; otp: string }) =>

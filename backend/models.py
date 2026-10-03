@@ -14,14 +14,21 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String(255), unique=True, index=True, nullable=False)
+    mobile_number = Column(String(32), unique=True, index=True, nullable=True)
+    country_code = Column(String(8), default="+91", nullable=True)
+    email_verified = Column(Boolean, default=False, nullable=True)
+    mobile_verified = Column(Boolean, default=False, nullable=True)
     hashed_password = Column(String(255), nullable=False)
     full_name = Column(String(255), nullable=True)
     is_active = Column(Boolean, default=True)
-    is_verified = Column(Boolean, default=True)  # Existing users default to verified
-    verification_token = Column(String(255), nullable=True)
+    is_verified = Column(Boolean, default=True)  # Overall active/verified status
+    verification_token = Column(String(255), nullable=True)  # Email OTP hash
     verification_token_expires_at = Column(DateTime, nullable=True)
     otp_attempts = Column(Integer, default=0, nullable=True)
-    onboarded = Column(Boolean, default=True)    # Existing users default to onboarded
+    mobile_otp_token = Column(String(255), nullable=True)    # Mobile OTP hash
+    mobile_otp_expires_at = Column(DateTime, nullable=True)
+    mobile_otp_attempts = Column(Integer, default=0, nullable=True)
+    onboarded = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

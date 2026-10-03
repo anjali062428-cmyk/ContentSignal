@@ -525,39 +525,41 @@ export const api = {
   },
 
   // Auth & Onboarding
-  login: (data: { identifier?: string; email?: string; password: string; remember_me?: boolean }) =>
+  login: (data: { identifier?: string; email?: string; mobile_number?: string; password: string; remember_me?: boolean }) =>
     request<any>("/auth/login", { method: "POST", body: JSON.stringify(data) }),
   register: (data: any) => request<any>("/auth/register", { method: "POST", body: JSON.stringify(data) }),
   signupInitiate: (data: {
     full_name: string;
-    email: string;
+    auth_type?: "email" | "phone";
+    email?: string;
     mobile_number?: string;
     country_code?: string;
     password: string;
     confirm_password: string;
     terms_accepted?: boolean;
   }) => request<any>("/auth/signup-initiate", { method: "POST", body: JSON.stringify(data) }),
-  signupVerify: (data: { email: string; otp: string }) =>
+  signupVerify: (data: { email?: string; mobile_number?: string; identifier?: string; otp: string }) =>
     request<any>("/auth/signup-verify", { method: "POST", body: JSON.stringify(data) }),
-  signupVerifyEmail: (data: { email: string; otp: string }) =>
+  signupVerifyEmail: (data: { email?: string; identifier?: string; otp: string }) =>
     request<any>("/auth/signup-verify-email", { method: "POST", body: JSON.stringify(data) }),
-  signupVerifyMobile: (data: { email: string; otp: string }) =>
+  signupVerifyMobile: (data: { identifier?: string; mobile_number?: string; email?: string; otp: string }) =>
     request<any>("/auth/signup-verify-mobile", { method: "POST", body: JSON.stringify(data) }),
-  resendEmailOtp: (data: { email: string }) =>
+  resendEmailOtp: (data: { email?: string; identifier?: string }) =>
     request<any>("/auth/resend-email-otp", { method: "POST", body: JSON.stringify(data) }),
-  resendMobileOtp: (data: { email: string }) =>
+  resendMobileOtp: (data: { identifier?: string; mobile_number?: string; email?: string }) =>
     request<any>("/auth/resend-mobile-otp", { method: "POST", body: JSON.stringify(data) }),
-  changeContact: (data: { email: string; new_email?: string; new_mobile?: string; country_code?: string }) =>
+  changeContact: (data: { email?: string; current_email?: string; current_identifier?: string; new_email?: string; new_mobile?: string; country_code?: string }) =>
     request<any>("/auth/change-contact", { method: "POST", body: JSON.stringify(data) }),
   loginOtpInitiate: (data: { identifier: string }) =>
     request<any>("/auth/login-otp-initiate", { method: "POST", body: JSON.stringify(data) }),
   loginOtpVerify: (data: { identifier: string; otp: string }) =>
     request<any>("/auth/login-otp-verify", { method: "POST", body: JSON.stringify(data) }),
-  forgotPassword: (data: { identifier?: string; email?: string }) =>
+  forgotPassword: (data: { identifier?: string; email?: string; mobile_number?: string }) =>
     request<any>("/auth/forgot-password", { method: "POST", body: JSON.stringify(data) }),
   resetPassword: (data: {
     identifier?: string;
     email?: string;
+    mobile_number?: string;
     otp: string;
     new_password: string;
     confirm_password: string;

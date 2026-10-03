@@ -44,14 +44,17 @@ class OnboardingRequest(BaseModel):
 
 class UserLoginRequest(BaseModel):
     email: Optional[str] = None
+    mobile_number: Optional[str] = None
     identifier: Optional[str] = None
+    auth_type: Optional[str] = None
     password: str
     remember_me: Optional[bool] = False
 
 
 class SignUpInitiateRequest(BaseModel):
     full_name: str
-    email: EmailStr
+    auth_type: Optional[str] = "email"
+    email: Optional[EmailStr] = None
     mobile_number: Optional[str] = None
     country_code: Optional[str] = "+91"
     password: str = Field(min_length=8)
@@ -60,21 +63,29 @@ class SignUpInitiateRequest(BaseModel):
 
 
 class SignUpVerifyRequest(BaseModel):
-    email: EmailStr
+    email: Optional[EmailStr] = None
+    mobile_number: Optional[str] = None
+    identifier: Optional[str] = None
+    auth_type: Optional[str] = None
     otp: str = Field(min_length=6, max_length=6)
 
 
 class VerifyMobileOTPRequest(BaseModel):
-    identifier: str
+    identifier: Optional[str] = None
+    mobile_number: Optional[str] = None
+    email: Optional[str] = None
     otp: str = Field(min_length=6, max_length=6)
 
 
 class ResendMobileOTPRequest(BaseModel):
-    identifier: str
+    identifier: Optional[str] = None
+    mobile_number: Optional[str] = None
+    email: Optional[str] = None
 
 
 class ChangeContactRequest(BaseModel):
-    current_email: EmailStr
+    current_email: Optional[EmailStr] = None
+    current_identifier: Optional[str] = None
     new_email: Optional[EmailStr] = None
     new_mobile: Optional[str] = None
     country_code: Optional[str] = "+91"
@@ -96,11 +107,13 @@ class TestEmailRequest(BaseModel):
 class ForgotPasswordRequest(BaseModel):
     email: Optional[str] = None
     identifier: Optional[str] = None
+    mobile_number: Optional[str] = None
 
 
 class ResetPasswordRequest(BaseModel):
     email: Optional[str] = None
     identifier: Optional[str] = None
+    mobile_number: Optional[str] = None
     otp: str = Field(min_length=6, max_length=6)
     new_password: str = Field(min_length=8)
     confirm_password: str = Field(min_length=8)
@@ -114,8 +127,10 @@ class TokenResponse(BaseModel):
 
 class RegisterResponse(BaseModel):
     message: str
-    email: str
-    masked_email: str
+    email: Optional[str] = None
+    mobile_number: Optional[str] = None
+    masked_email: Optional[str] = None
+    masked_mobile: Optional[str] = None
     is_verified: bool
     verification_token: Optional[str] = None
 
@@ -123,9 +138,11 @@ class RegisterResponse(BaseModel):
 class UserResponse(BaseModel):
     model_config = {"from_attributes": True}
     id: int
-    email: str
+    email: Optional[str] = None
+    mobile_number: Optional[str] = None
+    country_code: Optional[str] = "+91"
     full_name: Optional[str] = None
-    is_active: bool
+    is_active: bool = True
     is_verified: bool = True
     onboarded: bool = True
 

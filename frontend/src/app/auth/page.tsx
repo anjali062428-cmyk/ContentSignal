@@ -31,6 +31,7 @@ type SignupStep = "form" | "verify";
 type LoginMethod = "password" | "otp";
 type LoginOtpStep = "request" | "verify";
 type ResetStep = "request" | "verify";
+type IdentifierType = "email" | "phone";
 
 const COUNTRY_CODES = [
   { code: "+91", label: "India (+91)", flag: "🇮🇳" },
@@ -54,6 +55,10 @@ export default function AuthPage() {
 
   // Mode: "login" | "signup" | "forgot_password"
   const [mode, setMode] = useState<AuthMode>("login");
+
+  // Identifier choice for signup & login: "email" | "phone"
+  const [signupAuthType, setSignupAuthType] = useState<IdentifierType>("email");
+  const [loginAuthType, setLoginAuthType] = useState<IdentifierType>("email");
 
   // ==========================================
   // SIGNUP STATE
@@ -107,6 +112,9 @@ export default function AuthPage() {
   // ==========================================
   const [loginMethod, setLoginMethod] = useState<LoginMethod>("password");
   const [loginIdentifier, setLoginIdentifier] = useState("");
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPhone, setLoginPhone] = useState("");
+  const [loginCountryCode, setLoginCountryCode] = useState("+91");
   const [loginPassword, setLoginPassword] = useState("");
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
@@ -150,9 +158,11 @@ export default function AuthPage() {
       const saved = sessionStorage.getItem("cs_pending_auth");
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed.email && parsed.step === "verify") {
-          setSignupEmail(parsed.email);
-          setMaskedEmail(parsed.maskedEmail || parsed.email);
+        if ((parsed.email || parsed.mobileNumber) && parsed.step === "verify") {
+          const aType = parsed.authType || (parsed.mobileNumber && !parsed.email ? "phone" : "email");
+          setSignupAuthType(aType);
+          setSignupEmail(parsed.email || "");
+          setMaskedEmail(parsed.maskedEmail || parsed.email || "");
           setFullName(parsed.fullName || "");
           setMobileNumber(parsed.mobileNumber || "");
           setCountryCode(parsed.countryCode || "+91");
@@ -175,6 +185,7 @@ export default function AuthPage() {
       sessionStorage.setItem(
         "cs_pending_auth",
         JSON.stringify({
+          authType: signupAuthType,
           email: signupEmail.trim(),
           maskedEmail,
           fullName: fullName.trim(),
@@ -363,7 +374,7 @@ export default function AuthPage() {
   };
 
   // ==========================================
-  // SIGNUP FLOW (Phase 1, 2, 7, 10, 11)
+  // SIGNUP FLOW
   // ==========================================
   const handleSignupInitiate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -373,17 +384,20 @@ export default function AuthPage() {
       setError("Please enter your full name.");
       return;
     }
-    if (!signupEmail.trim() || !signupEmail.includes("@")) {
-      setError("Please enter a valid email address.");
-      return;
-    }
-    if (mobileNumber.trim()) {
+
+    if (signupAuthType === "email") {
+      if (!signupEmail.trim() || !signupEmail.includes("@")) {
+        setError("Please enter a valid email address.");
+        return;
+      }
+    } else {
       const cleanMob = mobileNumber.replace(/[\s-]/g, "");
-      if (!/^\d{7,15}$/.test(cleanMob)) {
-        setError("Please enter a valid mobile number (7 to 15 digits).");
+      if (!cleanMob || !/^\d{7,15}$/.test(cleanMob)) {
+        setError("Please enter a valid phone number (7 to 15 digits).");
         return;
       }
     }
+
     if (!signupStrength.isValid) {
       setError(
         "Password must be at least 8 characters and include uppercase, lowercase, number, and special character."
@@ -401,10 +415,12 @@ export default function AuthPage() {
 
     setLoading(true);
     try {
+      const cleanMob = mobileNumber.trim().replace(/[\s-]/g, "");
       const res = await api.signupInitiate({
         full_name: fullName.trim(),
-        email: signupEmail.trim(),
-        mobile_number: mobileNumber.trim() ? mobileNumber.replace(/[\s-]/g, "") : undefined,
+        auth_type: signupAuthType,
+        email: signupAuthType === "email" ? signupEmail.trim() : undefined,
+        mobile_number: signupAuthType === "phone" ? cleanMob : undefined,
         country_code: countryCode,
         password: signupPassword,
         confirm_password: confirmPassword,
@@ -418,14 +434,11 @@ export default function AuthPage() {
         return;
       }
 
-      const maskedEm = res.masked_email || signupEmail.trim();
-      const maskedMob = res.masked_mobile || (mobileNumber.trim() ? `${countryCode} ${mobileNumber.trim()}` : "");
-      const isSmsOk = res.sms_status !== "SMS_NOT_CONFIGURED";
+      const maskedEm = res.masked_email || res.email?.masked || signupEmail.trim();
+      const maskedMob = res.masked_mobile || res.mobile?.masked || (cleanMob ? `${countryCode} ${cleanMob}` : "");
 
       setMaskedEmail(maskedEm);
       setMaskedMobile(maskedMob);
-      setSmsConfigured(isSmsOk);
-      setSmsMessage(res.sms_message || "");
       setEmailVerified(false);
       setMobileVerified(false);
       setEmailDigits(["", "", "", "", "", ""]);
@@ -435,12 +448,19 @@ export default function AuthPage() {
       setEmailResendCooldown(60);
       setMobileResendCooldown(60);
       setSignupStep("verify");
-      setSuccessMessage(res.message || "Verification code sent to your email.");
+      setSuccessMessage(
+        res.message ||
+          (signupAuthType === "email"
+            ? "Verification code sent to your email."
+            : "Verification code sent to your phone.")
+      );
 
       savePendingState({
+        authType: signupAuthType,
+        email: signupAuthType === "email" ? signupEmail.trim() : "",
+        mobileNumber: signupAuthType === "phone" ? cleanMob : "",
         maskedEmail: maskedEm,
         maskedMobile: maskedMob,
-        smsConfigured: isSmsOk,
         emailVerified: false,
         mobileVerified: false,
       });
@@ -469,9 +489,6 @@ export default function AuthPage() {
       });
 
       setEmailVerified(true);
-      savePendingState({ emailVerified: true });
-
-      // If user is now fully verified or mobile is optional/not configured
       if (res.access_token) {
         setToken(res.access_token);
         sessionStorage.removeItem("cs_pending_auth");
@@ -502,14 +519,15 @@ export default function AuthPage() {
     clearFeedback();
     setLoading(true);
     try {
+      const cleanMob = mobileNumber.replace(/[\s-]/g, "");
       const res = await api.signupVerifyMobile({
+        identifier: cleanMob || signupEmail.trim(),
+        mobile_number: cleanMob,
         email: signupEmail.trim(),
         otp: code,
       });
 
       setMobileVerified(true);
-      savePendingState({ mobileVerified: true });
-
       if (res.access_token) {
         setToken(res.access_token);
         sessionStorage.removeItem("cs_pending_auth");
@@ -553,7 +571,11 @@ export default function AuthPage() {
     clearFeedback();
     setLoading(true);
     try {
-      const res = await api.resendMobileOtp({ email: signupEmail.trim() });
+      const cleanMob = mobileNumber.replace(/[\s-]/g, "");
+      const res = await api.resendMobileOtp({
+        identifier: cleanMob || signupEmail.trim(),
+        mobile_number: cleanMob,
+      });
       setMobileResendCooldown(60);
       setMobileCountdown(300);
       setMobileDigits(["", "", "", "", "", ""]);
@@ -566,33 +588,7 @@ export default function AuthPage() {
     }
   };
 
-  // Skip Mobile Verification (Phase 11)
-  const handleSkipMobileVerification = async () => {
-    if (!emailVerified) {
-      setError("Please verify your email address before continuing.");
-      return;
-    }
-    clearFeedback();
-    setLoading(true);
-    try {
-      // Re-call verify-email or login to get token now that email is verified
-      const res = await api.login({
-        email: signupEmail.trim(),
-        password: signupPassword,
-      });
-      if (res.access_token) {
-        setToken(res.access_token);
-        sessionStorage.removeItem("cs_pending_auth");
-        router.push("/dashboard");
-      }
-    } catch (err: any) {
-      setError(err.message || "Failed to finalize account activation.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Inline Change Email (Phase 12)
+  // Inline Change Email
   const handleSaveChangeEmail = async (e: React.FormEvent) => {
     e.preventDefault();
     const newEm = editEmailVal.trim();
@@ -606,6 +602,7 @@ export default function AuthPage() {
     try {
       const res = await api.changeContact({
         email: signupEmail.trim(),
+        current_email: signupEmail.trim(),
         new_email: newEm,
       });
 
@@ -630,7 +627,7 @@ export default function AuthPage() {
     }
   };
 
-  // Inline Change Mobile (Phase 12)
+  // Inline Change Mobile
   const handleSaveChangeMobile = async (e: React.FormEvent) => {
     e.preventDefault();
     const newMob = editMobileVal.trim().replace(/[\s-]/g, "");
@@ -643,7 +640,8 @@ export default function AuthPage() {
     setLoading(true);
     try {
       const res = await api.changeContact({
-        email: signupEmail.trim(),
+        current_identifier: mobileNumber.replace(/[\s-]/g, "") || signupEmail.trim(),
+        current_email: signupEmail.trim() || undefined,
         new_mobile: newMob,
         country_code: editCountryCodeVal,
       });
@@ -656,7 +654,7 @@ export default function AuthPage() {
       setMobileCountdown(300);
       setMobileResendCooldown(60);
       setIsEditingMobile(false);
-      setSuccessMessage(res.message || "Verification code sent to your new mobile number.");
+      setSuccessMessage(res.message || `Verification code sent to ${newMob}`);
 
       savePendingState({
         mobileNumber: newMob,
@@ -665,7 +663,7 @@ export default function AuthPage() {
         mobileVerified: false,
       });
     } catch (err: any) {
-      setError(err.message || "Failed to update mobile number.");
+      setError(err.message || "Failed to update phone number.");
     } finally {
       setLoading(false);
     }
@@ -685,9 +683,21 @@ export default function AuthPage() {
     e.preventDefault();
     clearFeedback();
 
-    const ident = loginIdentifier.trim();
+    const ident =
+      loginAuthType === "email"
+        ? (loginEmail.trim() || loginIdentifier.trim())
+        : (loginPhone.trim().replace(/[\s-]/g, "") || loginIdentifier.trim());
+
     if (!ident) {
-      setError("Please enter your email address or mobile number.");
+      setError(loginAuthType === "email" ? "Please enter your email address." : "Please enter your phone number.");
+      return;
+    }
+    if (loginAuthType === "email" && !ident.includes("@")) {
+      setError("Please enter a valid email address.");
+      return;
+    }
+    if (loginAuthType === "phone" && !/^\d{7,15}$/.test(ident.replace(/\D/g, ""))) {
+      setError("Please enter a valid phone number (7 to 15 digits).");
       return;
     }
     if (!loginPassword) {
@@ -710,9 +720,9 @@ export default function AuthPage() {
       }
     } catch (err: any) {
       if (err.status === 401 || err.status === 404) {
-        setError("Invalid email/mobile or password.");
+        setError(loginAuthType === "email" ? "Invalid email or password." : "Invalid phone number or password.");
       } else {
-        setError(err.message || "Invalid email/mobile or password.");
+        setError(err.message || "Invalid credentials.");
       }
     } finally {
       setLoading(false);
@@ -965,31 +975,98 @@ export default function AuthPage() {
 
               {loginMethod === "password" ? (
                 <form onSubmit={handlePasswordLogin} className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                      Email or Mobile Number
-                    </label>
-                    <div className="relative">
-                      <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                        {loginIdentifier.includes("@") ? (
-                          <Mail className="w-4 h-4" />
-                        ) : (
-                          <Smartphone className="w-4 h-4" />
-                        )}
-                      </span>
-                      <input
-                        type="text"
-                        required
-                        value={loginIdentifier}
-                        onChange={(e) => {
-                          setLoginIdentifier(e.target.value);
-                          clearFeedback();
-                        }}
-                        placeholder="name@company.com or 9876543210"
-                        className="w-full pl-10 pr-3.5 py-2.5 text-sm rounded-xl border border-slate-800 bg-slate-950/70 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
-                      />
-                    </div>
+                  {/* Segmented Selector: [ Email ] [ Phone ] */}
+                  <div className="grid grid-cols-2 p-1 bg-slate-900/90 rounded-xl border border-slate-800/80 mb-4">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLoginAuthType("email");
+                        clearFeedback();
+                      }}
+                      className={`py-2 text-xs font-semibold rounded-lg flex items-center justify-center gap-2 transition-all ${
+                        loginAuthType === "email"
+                          ? "bg-slate-800 text-white shadow-sm border border-slate-700/60"
+                          : "text-slate-400 hover:text-slate-200"
+                      }`}
+                    >
+                      <Mail className="w-3.5 h-3.5" />
+                      <span>Email</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLoginAuthType("phone");
+                        clearFeedback();
+                      }}
+                      className={`py-2 text-xs font-semibold rounded-lg flex items-center justify-center gap-2 transition-all ${
+                        loginAuthType === "phone"
+                          ? "bg-slate-800 text-white shadow-sm border border-slate-700/60"
+                          : "text-slate-400 hover:text-slate-200"
+                      }`}
+                    >
+                      <Smartphone className="w-3.5 h-3.5" />
+                      <span>Phone</span>
+                    </button>
                   </div>
+
+                  {loginAuthType === "email" ? (
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                        Email
+                      </label>
+                      <div className="relative">
+                        <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                          <Mail className="w-4 h-4" />
+                        </span>
+                        <input
+                          type="email"
+                          required
+                          value={loginEmail}
+                          onChange={(e) => {
+                            setLoginEmail(e.target.value);
+                            clearFeedback();
+                          }}
+                          placeholder="name@company.com"
+                          className="w-full pl-10 pr-3.5 py-2.5 text-sm rounded-xl border border-slate-800 bg-slate-950/70 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                        Phone Number
+                      </label>
+                      <div className="flex gap-2">
+                        <select
+                          value={loginCountryCode}
+                          onChange={(e) => setLoginCountryCode(e.target.value)}
+                          className="w-[110px] shrink-0 px-2 py-2.5 text-xs font-medium rounded-xl border border-slate-800 bg-slate-950/70 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all cursor-pointer"
+                        >
+                          {COUNTRY_CODES.map((c) => (
+                            <option key={c.code} value={c.code} className="bg-slate-900 text-white">
+                              {c.flag} {c.code}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="relative flex-1">
+                          <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                            <Smartphone className="w-4 h-4" />
+                          </span>
+                          <input
+                            type="tel"
+                            required
+                            value={loginPhone}
+                            onChange={(e) => {
+                              setLoginPhone(e.target.value.replace(/[^\d\s-]/g, ""));
+                              clearFeedback();
+                            }}
+                            placeholder="98765 43210"
+                            className="w-full pl-10 pr-3.5 py-2.5 text-sm rounded-xl border border-slate-800 bg-slate-950/70 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   <div>
                     <div className="flex items-center justify-between mb-1.5">
@@ -998,7 +1075,8 @@ export default function AuthPage() {
                         type="button"
                         onClick={() => {
                           clearFeedback();
-                          setResetIdentifier(loginIdentifier);
+                          const activeIdent = loginAuthType === "email" ? loginEmail : (loginPhone.trim() ? `${loginCountryCode}${loginPhone.replace(/\D/g, "")}` : "");
+                          setResetIdentifier(activeIdent);
                           setMode("forgot_password");
                           setResetStep("request");
                         }}
@@ -1047,7 +1125,11 @@ export default function AuthPage() {
 
                   <button
                     type="submit"
-                    disabled={loading || !loginIdentifier || !loginPassword}
+                    disabled={
+                      loading ||
+                      (loginAuthType === "email" ? !loginEmail.trim() : !loginPhone.trim()) ||
+                      !loginPassword
+                    }
                     className="w-full mt-2 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-emerald-950/40"
                   >
                     {loading ? (
@@ -1198,7 +1280,13 @@ export default function AuthPage() {
                   type="button"
                   onClick={() => {
                     clearFeedback();
-                    setSignupEmail(loginIdentifier.includes("@") ? loginIdentifier : "");
+                    setSignupAuthType(loginAuthType);
+                    if (loginAuthType === "email") {
+                      setSignupEmail(loginEmail);
+                    } else {
+                      setMobileNumber(loginPhone);
+                      setCountryCode(loginCountryCode);
+                    }
                     setMode("signup");
                     setSignupStep("form");
                   }}
@@ -1215,6 +1303,40 @@ export default function AuthPage() {
           {/* ================================================================= */}
           {mode === "signup" && signupStep === "form" && (
             <form onSubmit={handleSignupInitiate} className="space-y-4">
+              {/* Segmented Selector: [ Email ] [ Phone ] */}
+              <div className="grid grid-cols-2 p-1 bg-slate-900/90 rounded-xl border border-slate-800/80 mb-4">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSignupAuthType("email");
+                    clearFeedback();
+                  }}
+                  className={`py-2 text-xs font-semibold rounded-lg flex items-center justify-center gap-2 transition-all ${
+                    signupAuthType === "email"
+                      ? "bg-slate-800 text-white shadow-sm border border-slate-700/60"
+                      : "text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  <Mail className="w-3.5 h-3.5" />
+                  <span>Email</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSignupAuthType("phone");
+                    clearFeedback();
+                  }}
+                  className={`py-2 text-xs font-semibold rounded-lg flex items-center justify-center gap-2 transition-all ${
+                    signupAuthType === "phone"
+                      ? "bg-slate-800 text-white shadow-sm border border-slate-700/60"
+                      : "text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  <Smartphone className="w-3.5 h-3.5" />
+                  <span>Phone</span>
+                </button>
+              </div>
+
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1.5">Full Name</label>
                 <div className="relative">
@@ -1235,59 +1357,60 @@ export default function AuthPage() {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">Work Email</label>
-                <div className="relative">
-                  <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                    <Mail className="w-4 h-4" />
-                  </span>
-                  <input
-                    type="email"
-                    required
-                    value={signupEmail}
-                    onChange={(e) => {
-                      setSignupEmail(e.target.value);
-                      clearFeedback();
-                    }}
-                    placeholder="anjali@company.com"
-                    className="w-full pl-10 pr-3.5 py-2.5 text-sm rounded-xl border border-slate-800 bg-slate-950/70 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Mobile Number <span className="text-slate-500 font-normal">(Optional)</span>
-                </label>
-                <div className="flex gap-2">
-                  <select
-                    value={countryCode}
-                    onChange={(e) => setCountryCode(e.target.value)}
-                    className="w-[110px] shrink-0 px-2 py-2.5 text-xs font-medium rounded-xl border border-slate-800 bg-slate-950/70 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all cursor-pointer"
-                  >
-                    {COUNTRY_CODES.map((c) => (
-                      <option key={c.code} value={c.code} className="bg-slate-900 text-white">
-                        {c.flag} {c.code}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="relative flex-1">
+              {signupAuthType === "email" ? (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">Work Email</label>
+                  <div className="relative">
                     <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                      <Phone className="w-4 h-4" />
+                      <Mail className="w-4 h-4" />
                     </span>
                     <input
-                      type="tel"
-                      value={mobileNumber}
+                      type="email"
+                      required
+                      value={signupEmail}
                       onChange={(e) => {
-                        setMobileNumber(e.target.value.replace(/[^\d\s-]/g, ""));
+                        setSignupEmail(e.target.value);
                         clearFeedback();
                       }}
-                      placeholder="98765 43210"
+                      placeholder="anjali@company.com"
                       className="w-full pl-10 pr-3.5 py-2.5 text-sm rounded-xl border border-slate-800 bg-slate-950/70 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
                     />
                   </div>
                 </div>
-              </div>
+              ) : (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">Phone Number</label>
+                  <div className="flex gap-2">
+                    <select
+                      value={countryCode}
+                      onChange={(e) => setCountryCode(e.target.value)}
+                      className="w-[110px] shrink-0 px-2 py-2.5 text-xs font-medium rounded-xl border border-slate-800 bg-slate-950/70 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all cursor-pointer"
+                    >
+                      {COUNTRY_CODES.map((c) => (
+                        <option key={c.code} value={c.code} className="bg-slate-900 text-white">
+                          {c.flag} {c.code}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="relative flex-1">
+                      <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                        <Smartphone className="w-4 h-4" />
+                      </span>
+                      <input
+                        type="tel"
+                        required
+                        value={mobileNumber}
+                        onChange={(e) => {
+                          setMobileNumber(e.target.value.replace(/[^\d\s-]/g, ""));
+                          clearFeedback();
+                        }}
+                        placeholder="98765 43210"
+                        className="w-full pl-10 pr-3.5 py-2.5 text-sm rounded-xl border border-slate-800 bg-slate-950/70 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1.5">Password</label>
@@ -1406,7 +1529,7 @@ export default function AuthPage() {
                 disabled={
                   loading ||
                   !fullName.trim() ||
-                  !signupEmail ||
+                  (signupAuthType === "email" ? !signupEmail.trim() : !mobileNumber.trim()) ||
                   !signupStrength.isValid ||
                   !signupPassMatch ||
                   !agreeTerms
@@ -1417,7 +1540,7 @@ export default function AuthPage() {
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
                   <>
-                    <span>Create Account &amp; Verify</span>
+                    <span>{signupAuthType === "email" ? "Send Email Code" : "Send SMS Code"}</span>
                     <ArrowRight className="w-4 h-4" />
                   </>
                 )}
@@ -1429,7 +1552,13 @@ export default function AuthPage() {
                   type="button"
                   onClick={() => {
                     clearFeedback();
-                    setLoginIdentifier(signupEmail);
+                    setLoginAuthType(signupAuthType);
+                    if (signupAuthType === "email") {
+                      setLoginEmail(signupEmail);
+                    } else {
+                      setLoginPhone(mobileNumber);
+                      setLoginCountryCode(countryCode);
+                    }
                     setMode("login");
                   }}
                   className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 transition-colors"
@@ -1441,307 +1570,111 @@ export default function AuthPage() {
           )}
 
           {/* ================================================================= */}
-          {/* SCREEN 2: DUAL VERIFICATION SCREEN (Phases 10, 11, 12, 15)        */}
+          {/* SCREEN 2: VERIFICATION SCREEN                                      */}
           {/* ================================================================= */}
           {mode === "signup" && signupStep === "verify" && (
             <div className="space-y-6">
-              {/* Header */}
-              <div className="text-center space-y-1.5 pb-2">
-                <div className="w-12 h-12 mx-auto rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 mb-2">
-                  <ShieldCheck className="w-6 h-6" />
-                </div>
-                <h2 className="text-lg font-bold text-white">Verify Your Account</h2>
-                <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                  We need to verify your contact details before activating your ContentSignal account.
-                </p>
-              </div>
-
-              {/* ------------------------------------------------------------- */}
-              {/* SECTION 1: EMAIL VERIFICATION                                 */}
-              {/* ------------------------------------------------------------- */}
-              <div className="p-4 rounded-xl border border-slate-800 bg-slate-950/50 space-y-3.5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    {emailVerified ? (
-                      <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                        <Check className="w-3.5 h-3.5" />
-                      </div>
-                    ) : (
-                      <div className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center">
-                        <Clock className="w-3.5 h-3.5" />
-                      </div>
-                    )}
-                    <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
-                      Email Verification
-                    </span>
-                  </div>
-                  <span
-                    className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
-                      emailVerified
-                        ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                        : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
-                    }`}
-                  >
-                    {emailVerified ? "Verified" : "Pending"}
-                  </span>
-                </div>
-
-                {/* Email address display & change button */}
-                <div className="flex items-center justify-between text-xs bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80">
-                  <div className="flex items-center gap-2 truncate">
-                    <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                    <span className="font-mono text-slate-200 truncate">{maskedEmail}</span>
-                  </div>
-                  {!emailVerified && !isEditingEmail && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditEmailVal(signupEmail);
-                        setIsEditingEmail(true);
-                      }}
-                      className="text-emerald-400 hover:text-emerald-300 text-xs font-medium flex items-center gap-1 shrink-0 ml-2"
-                    >
-                      <Edit3 className="w-3 h-3" />
-                      <span>Change</span>
-                    </button>
-                  )}
-                </div>
-
-                {/* Inline Change Email Form (Phase 12) */}
-                {isEditingEmail && !emailVerified && (
-                  <form onSubmit={handleSaveChangeEmail} className="space-y-2 pt-1">
-                    <div className="flex gap-2">
-                      <input
-                        type="email"
-                        required
-                        value={editEmailVal}
-                        onChange={(e) => setEditEmailVal(e.target.value)}
-                        placeholder="new.email@company.com"
-                        className="flex-1 px-3 py-1.5 text-xs rounded-lg border border-slate-700 bg-slate-950 text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                      />
-                      <button
-                        type="submit"
-                        disabled={loading || !editEmailVal.includes("@")}
-                        className="px-3 py-1.5 text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg disabled:opacity-50"
-                      >
-                        {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : "Update & Resend"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setIsEditingEmail(false)}
-                        className="px-2 py-1.5 text-xs text-slate-400 hover:text-white"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
+              {signupAuthType === "email" ? (
+                <>
+                  {/* Email Verification Header */}
+                  <div className="text-center space-y-1.5 pb-2">
+                    <div className="w-12 h-12 mx-auto rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 mb-2">
+                      <Mail className="w-6 h-6" />
                     </div>
-                  </form>
-                )}
-
-                {/* OTP Input Boxes (only if not yet verified) */}
-                {!emailVerified && !isEditingEmail && (
-                  <div className="space-y-3 pt-1">
-                    <div className="flex justify-center items-center gap-2">
-                      {emailDigits.map((digit, idx) => (
-                        <input
-                          key={idx}
-                          ref={(el) => {
-                            emailInputRefs.current[idx] = el;
-                          }}
-                          type="text"
-                          inputMode="numeric"
-                          maxLength={1}
-                          value={digit}
-                          onChange={(e) =>
-                            handleDigitChangeGeneric(
-                              idx,
-                              e.target.value,
-                              emailDigits,
-                              setEmailDigits,
-                              emailInputRefs
-                            )
-                          }
-                          onKeyDown={(e) =>
-                            handleDigitKeyDownGeneric(
-                              idx,
-                              e,
-                              emailDigits,
-                              setEmailDigits,
-                              emailInputRefs
-                            )
-                          }
-                          onPaste={(e) => handlePasteGeneric(e, setEmailDigits, emailInputRefs)}
-                          className="w-10 h-12 text-center text-lg font-bold font-mono rounded-xl border border-slate-700 bg-slate-950/80 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
-                        />
-                      ))}
-                    </div>
-
-                    <div className="flex items-center justify-between text-[11px] text-slate-400 px-1">
-                      <span>
-                        Code expires in{" "}
-                        <span className="font-mono text-emerald-400 font-semibold">
-                          {formatTime(emailCountdown)}
-                        </span>
-                      </span>
-                      <button
-                        type="button"
-                        disabled={emailResendCooldown > 0 || loading}
-                        onClick={handleResendEmailOtp}
-                        className="font-medium text-emerald-400 hover:text-emerald-300 disabled:text-slate-500 disabled:cursor-not-allowed flex items-center gap-1"
-                      >
-                        <RefreshCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} />
-                        <span>
-                          {emailResendCooldown > 0 ? `Resend in ${emailResendCooldown}s` : "Resend code"}
-                        </span>
-                      </button>
-                    </div>
-
-                    <button
-                      type="button"
-                      disabled={loading || emailDigits.join("").length !== 6}
-                      onClick={() => handleVerifyEmail()}
-                      className="w-full py-2 px-3 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin mx-auto" /> : "Verify Email"}
-                    </button>
-
-                    <p className="text-[10px] text-slate-500 text-center">
-                      Check your spam or junk folder if you don&apos;t see it in your inbox.
+                    <h2 className="text-lg font-bold text-white">Verify Your Email</h2>
+                    <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                      Enter the 6-digit verification code sent to your email to activate your account.
                     </p>
                   </div>
-                )}
-              </div>
 
-              {/* ------------------------------------------------------------- */}
-              {/* SECTION 2: MOBILE VERIFICATION (Optional/Configured)          */}
-              {/* ------------------------------------------------------------- */}
-              {mobileNumber.trim() ? (
-                <div className="p-4 rounded-xl border border-slate-800 bg-slate-950/50 space-y-3.5">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      {mobileVerified ? (
-                        <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                          <Check className="w-3.5 h-3.5" />
-                        </div>
-                      ) : !smsConfigured ? (
-                        <div className="w-6 h-6 rounded-full bg-slate-700/50 text-slate-400 flex items-center justify-center">
-                          <AlertCircle className="w-3.5 h-3.5" />
-                        </div>
-                      ) : (
-                        <div className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center">
-                          <Clock className="w-3.5 h-3.5" />
-                        </div>
-                      )}
-                      <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
-                        Mobile Verification
+                  {/* Email Verification Box */}
+                  <div className="p-4 rounded-xl border border-slate-800 bg-slate-950/50 space-y-3.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        {emailVerified ? (
+                          <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                            <Check className="w-3.5 h-3.5" />
+                          </div>
+                        ) : (
+                          <div className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center">
+                            <Clock className="w-3.5 h-3.5" />
+                          </div>
+                        )}
+                        <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                          Email Verification
+                        </span>
+                      </div>
+                      <span
+                        className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
+                          emailVerified
+                            ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                            : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                        }`}
+                      >
+                        {emailVerified ? "Verified" : "Pending"}
                       </span>
                     </div>
-                    <span
-                      className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
-                        mobileVerified
-                          ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                          : !smsConfigured
-                          ? "bg-slate-800 text-slate-400 border border-slate-700"
-                          : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
-                      }`}
-                    >
-                      {mobileVerified
-                        ? "Verified"
-                        : !smsConfigured
-                        ? "Unavailable"
-                        : "Pending"}
-                    </span>
-                  </div>
 
-                  {/* Mobile number display & change button */}
-                  <div className="flex items-center justify-between text-xs bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80">
-                    <div className="flex items-center gap-2 truncate">
-                      <Smartphone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                      <span className="font-mono text-slate-200 truncate">{maskedMobile}</span>
-                    </div>
-                    {!mobileVerified && !isEditingMobile && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditMobileVal(mobileNumber);
-                          setEditCountryCodeVal(countryCode);
-                          setIsEditingMobile(true);
-                        }}
-                        className="text-emerald-400 hover:text-emerald-300 text-xs font-medium flex items-center gap-1 shrink-0 ml-2"
-                      >
-                        <Edit3 className="w-3 h-3" />
-                        <span>Change</span>
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Inline Change Mobile Form (Phase 12) */}
-                  {isEditingMobile && !mobileVerified && (
-                    <form onSubmit={handleSaveChangeMobile} className="space-y-2 pt-1">
-                      <div className="flex gap-2">
-                        <select
-                          value={editCountryCodeVal}
-                          onChange={(e) => setEditCountryCodeVal(e.target.value)}
-                          className="w-[85px] px-1 py-1.5 text-xs rounded-lg border border-slate-700 bg-slate-950 text-white"
-                        >
-                          {COUNTRY_CODES.map((c) => (
-                            <option key={c.code} value={c.code}>
-                              {c.code}
-                            </option>
-                          ))}
-                        </select>
-                        <input
-                          type="tel"
-                          required
-                          value={editMobileVal}
-                          onChange={(e) => setEditMobileVal(e.target.value)}
-                          placeholder="98765 43210"
-                          className="flex-1 px-3 py-1.5 text-xs rounded-lg border border-slate-700 bg-slate-950 text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                        />
-                        <button
-                          type="submit"
-                          disabled={loading || !editMobileVal.trim()}
-                          className="px-3 py-1.5 text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg disabled:opacity-50"
-                        >
-                          {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : "Update"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setIsEditingMobile(false)}
-                          className="px-2 py-1.5 text-xs text-slate-400 hover:text-white"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
+                    {/* Email address display & change button */}
+                    <div className="flex items-center justify-between text-xs bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80">
+                      <div className="flex items-center gap-2 truncate">
+                        <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        <span className="font-mono text-slate-200 truncate">{maskedEmail || signupEmail}</span>
                       </div>
-                    </form>
-                  )}
-
-                  {/* If SMS provider is NOT configured (Phase 10 & 11) */}
-                  {!smsConfigured ? (
-                    <div className="p-3 rounded-lg bg-slate-900 border border-slate-800 text-[11px] text-slate-400 space-y-2">
-                      <p>
-                        Mobile verification is temporarily unavailable. We&apos;ll verify your mobile number later.
-                      </p>
-                      {emailVerified && (
+                      {!emailVerified && !isEditingEmail && (
                         <button
                           type="button"
-                          onClick={handleSkipMobileVerification}
-                          className="text-xs font-semibold text-emerald-400 hover:underline flex items-center gap-1"
+                          onClick={() => {
+                            setEditEmailVal(signupEmail);
+                            setIsEditingEmail(true);
+                          }}
+                          className="text-emerald-400 hover:text-emerald-300 text-xs font-medium flex items-center gap-1 shrink-0 ml-2"
                         >
-                          <span>Proceed to Dashboard</span>
-                          <ArrowRight className="w-3 h-3" />
+                          <Edit3 className="w-3 h-3" />
+                          <span>Change</span>
                         </button>
                       )}
                     </div>
-                  ) : (
-                    /* If SMS provider IS configured */
-                    !mobileVerified && !isEditingMobile && (
+
+                    {/* Inline Change Email Form */}
+                    {isEditingEmail && !emailVerified && (
+                      <form onSubmit={handleSaveChangeEmail} className="space-y-2 pt-1">
+                        <div className="flex gap-2">
+                          <input
+                            type="email"
+                            required
+                            value={editEmailVal}
+                            onChange={(e) => setEditEmailVal(e.target.value)}
+                            placeholder="new.email@company.com"
+                            className="flex-1 px-3 py-1.5 text-xs rounded-lg border border-slate-700 bg-slate-950 text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                          />
+                          <button
+                            type="submit"
+                            disabled={loading || !editEmailVal.includes("@")}
+                            className="px-3 py-1.5 text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg disabled:opacity-50"
+                          >
+                            {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : "Update & Resend"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsEditingEmail(false)}
+                            className="px-2 py-1.5 text-xs text-slate-400 hover:text-white"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </form>
+                    )}
+
+                    {/* OTP Input Boxes */}
+                    {!emailVerified && !isEditingEmail && (
                       <div className="space-y-3 pt-1">
                         <div className="flex justify-center items-center gap-2">
-                          {mobileDigits.map((digit, idx) => (
+                          {emailDigits.map((digit, idx) => (
                             <input
                               key={idx}
                               ref={(el) => {
-                                mobileInputRefs.current[idx] = el;
+                                emailInputRefs.current[idx] = el;
                               }}
                               type="text"
                               inputMode="numeric"
@@ -1751,21 +1684,21 @@ export default function AuthPage() {
                                 handleDigitChangeGeneric(
                                   idx,
                                   e.target.value,
-                                  mobileDigits,
-                                  setMobileDigits,
-                                  mobileInputRefs
+                                  emailDigits,
+                                  setEmailDigits,
+                                  emailInputRefs
                                 )
                               }
                               onKeyDown={(e) =>
                                 handleDigitKeyDownGeneric(
                                   idx,
                                   e,
-                                  mobileDigits,
-                                  setMobileDigits,
-                                  mobileInputRefs
+                                  emailDigits,
+                                  setEmailDigits,
+                                  emailInputRefs
                                 )
                               }
-                              onPaste={(e) => handlePasteGeneric(e, setMobileDigits, mobileInputRefs)}
+                              onPaste={(e) => handlePasteGeneric(e, setEmailDigits, emailInputRefs)}
                               className="w-10 h-12 text-center text-lg font-bold font-mono rounded-xl border border-slate-700 bg-slate-950/80 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
                             />
                           ))}
@@ -1773,53 +1706,236 @@ export default function AuthPage() {
 
                         <div className="flex items-center justify-between text-[11px] text-slate-400 px-1">
                           <span>
-                            Expires in{" "}
+                            Code expires in{" "}
                             <span className="font-mono text-emerald-400 font-semibold">
-                              {formatTime(mobileCountdown)}
+                              {formatTime(emailCountdown)}
                             </span>
                           </span>
                           <button
                             type="button"
-                            disabled={mobileResendCooldown > 0 || loading}
-                            onClick={handleResendMobileOtp}
+                            disabled={emailResendCooldown > 0 || loading}
+                            onClick={handleResendEmailOtp}
                             className="font-medium text-emerald-400 hover:text-emerald-300 disabled:text-slate-500 disabled:cursor-not-allowed flex items-center gap-1"
                           >
                             <RefreshCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} />
                             <span>
-                              {mobileResendCooldown > 0
-                                ? `Resend in ${mobileResendCooldown}s`
-                                : "Resend SMS"}
+                              {emailResendCooldown > 0 ? `Resend in ${emailResendCooldown}s` : "Resend code"}
                             </span>
                           </button>
                         </div>
 
                         <button
                           type="button"
-                          disabled={loading || mobileDigits.join("").length !== 6}
-                          onClick={() => handleVerifyMobile()}
-                          className="w-full py-2 px-3 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                          disabled={loading || emailDigits.join("").length !== 6}
+                          onClick={() => handleVerifyEmail()}
+                          className="w-full py-2.5 px-4 rounded-xl text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-emerald-950/40"
                         >
-                          {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin mx-auto" /> : "Verify Mobile"}
+                          {loading ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "Verify & Activate Account"}
                         </button>
 
-                        {emailVerified && (
-                          <div className="text-center pt-1">
-                            <button
-                              type="button"
-                              onClick={handleSkipMobileVerification}
-                              className="text-[11px] text-slate-400 hover:text-slate-200 underline"
-                            >
-                              Skip mobile verification for now
-                            </button>
+                        <p className="text-[10px] text-slate-500 text-center">
+                          Check your spam or junk folder if you don&apos;t see it in your inbox.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* Phone Verification Header */}
+                  <div className="text-center space-y-1.5 pb-2">
+                    <div className="w-12 h-12 mx-auto rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 mb-2">
+                      <Smartphone className="w-6 h-6" />
+                    </div>
+                    <h2 className="text-lg font-bold text-white">Verify Your Phone</h2>
+                    <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                      Enter the 6-digit verification code sent via SMS to activate your account.
+                    </p>
+                  </div>
+
+                  {/* Phone Verification Box */}
+                  <div className="p-4 rounded-xl border border-slate-800 bg-slate-950/50 space-y-3.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        {mobileVerified ? (
+                          <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                            <Check className="w-3.5 h-3.5" />
+                          </div>
+                        ) : !smsConfigured ? (
+                          <div className="w-6 h-6 rounded-full bg-slate-700/50 text-slate-400 flex items-center justify-center">
+                            <AlertCircle className="w-3.5 h-3.5" />
+                          </div>
+                        ) : (
+                          <div className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center">
+                            <Clock className="w-3.5 h-3.5" />
                           </div>
                         )}
+                        <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                          Mobile Verification
+                        </span>
                       </div>
-                    )
-                  )}
-                </div>
-              ) : null}
+                      <span
+                        className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
+                          mobileVerified
+                            ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                            : !smsConfigured
+                            ? "bg-slate-800 text-slate-400 border border-slate-700"
+                            : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                        }`}
+                      >
+                        {mobileVerified
+                          ? "Verified"
+                          : !smsConfigured
+                          ? "Unavailable"
+                          : "Pending"}
+                      </span>
+                    </div>
 
-              {/* Bottom Complete Activation or Back link */}
+                    {/* Mobile number display & change button */}
+                    <div className="flex items-center justify-between text-xs bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80">
+                      <div className="flex items-center gap-2 truncate">
+                        <Smartphone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        <span className="font-mono text-slate-200 truncate">{maskedMobile || `${countryCode} ${mobileNumber}`}</span>
+                      </div>
+                      {!mobileVerified && !isEditingMobile && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditMobileVal(mobileNumber);
+                            setEditCountryCodeVal(countryCode);
+                            setIsEditingMobile(true);
+                          }}
+                          className="text-emerald-400 hover:text-emerald-300 text-xs font-medium flex items-center gap-1 shrink-0 ml-2"
+                        >
+                          <Edit3 className="w-3 h-3" />
+                          <span>Change</span>
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Inline Change Mobile Form */}
+                    {isEditingMobile && !mobileVerified && (
+                      <form onSubmit={handleSaveChangeMobile} className="space-y-2 pt-1">
+                        <div className="flex gap-2">
+                          <select
+                            value={editCountryCodeVal}
+                            onChange={(e) => setEditCountryCodeVal(e.target.value)}
+                            className="w-[85px] px-1 py-1.5 text-xs rounded-lg border border-slate-700 bg-slate-950 text-white"
+                          >
+                            {COUNTRY_CODES.map((c) => (
+                              <option key={c.code} value={c.code}>
+                                {c.code}
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            type="tel"
+                            required
+                            value={editMobileVal}
+                            onChange={(e) => setEditMobileVal(e.target.value)}
+                            placeholder="98765 43210"
+                            className="flex-1 px-3 py-1.5 text-xs rounded-lg border border-slate-700 bg-slate-950 text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                          />
+                          <button
+                            type="submit"
+                            disabled={loading || !editMobileVal.trim()}
+                            className="px-3 py-1.5 text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg disabled:opacity-50"
+                          >
+                            {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : "Update"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsEditingMobile(false)}
+                            className="px-2 py-1.5 text-xs text-slate-400 hover:text-white"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </form>
+                    )}
+
+                    {!smsConfigured ? (
+                      <div className="p-3 rounded-lg bg-slate-900 border border-slate-800 text-[11px] text-slate-400 space-y-2">
+                        <p>
+                          Mobile verification is currently unavailable. Please sign up using Email or try again later.
+                        </p>
+                      </div>
+                    ) : (
+                      !mobileVerified && !isEditingMobile && (
+                        <div className="space-y-3 pt-1">
+                          <div className="flex justify-center items-center gap-2">
+                            {mobileDigits.map((digit, idx) => (
+                              <input
+                                key={idx}
+                                ref={(el) => {
+                                  mobileInputRefs.current[idx] = el;
+                                }}
+                                type="text"
+                                inputMode="numeric"
+                                maxLength={1}
+                                value={digit}
+                                onChange={(e) =>
+                                  handleDigitChangeGeneric(
+                                    idx,
+                                    e.target.value,
+                                    mobileDigits,
+                                    setMobileDigits,
+                                    mobileInputRefs
+                                  )
+                                }
+                                onKeyDown={(e) =>
+                                  handleDigitKeyDownGeneric(
+                                    idx,
+                                    e,
+                                    mobileDigits,
+                                    setMobileDigits,
+                                    mobileInputRefs
+                                  )
+                                }
+                                onPaste={(e) => handlePasteGeneric(e, setMobileDigits, mobileInputRefs)}
+                                className="w-10 h-12 text-center text-lg font-bold font-mono rounded-xl border border-slate-700 bg-slate-950/80 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
+                              />
+                            ))}
+                          </div>
+
+                          <div className="flex items-center justify-between text-[11px] text-slate-400 px-1">
+                            <span>
+                              Expires in{" "}
+                              <span className="font-mono text-emerald-400 font-semibold">
+                                {formatTime(mobileCountdown)}
+                              </span>
+                            </span>
+                            <button
+                              type="button"
+                              disabled={mobileResendCooldown > 0 || loading}
+                              onClick={handleResendMobileOtp}
+                              className="font-medium text-emerald-400 hover:text-emerald-300 disabled:text-slate-500 disabled:cursor-not-allowed flex items-center gap-1"
+                            >
+                              <RefreshCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} />
+                              <span>
+                                {mobileResendCooldown > 0
+                                  ? `Resend in ${mobileResendCooldown}s`
+                                  : "Resend SMS"}
+                              </span>
+                            </button>
+                          </div>
+
+                          <button
+                            type="button"
+                            disabled={loading || mobileDigits.join("").length !== 6}
+                            onClick={() => handleVerifyMobile()}
+                            className="w-full py-2.5 px-4 rounded-xl text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-emerald-950/40"
+                          >
+                            {loading ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "Verify & Activate Account"}
+                          </button>
+                        </div>
+                      )
+                    )}
+                  </div>
+                </>
+              )}
+
+              {/* Bottom Back to signup link */}
               <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs">
                 <button
                   type="button"
@@ -1829,17 +1945,6 @@ export default function AuthPage() {
                   <ArrowLeft className="w-3.5 h-3.5" />
                   <span>Back to signup</span>
                 </button>
-
-                {emailVerified && (!mobileNumber.trim() || mobileVerified || !smsConfigured) && (
-                  <button
-                    type="button"
-                    onClick={() => router.push("/dashboard")}
-                    className="py-1.5 px-3 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1.5 shadow-md"
-                  >
-                    <span>Enter Dashboard</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
-                )}
               </div>
             </div>
           )}

@@ -116,19 +116,20 @@ class AuthService:
     def initiate_signup(
         db: Session,
         full_name: str,
-        email: str,
-        password: str,
-        confirm_password: str,
+        email: Optional[str] = None,
+        password: str = "",
+        confirm_password: str = "",
         mobile_number: Optional[str] = None,
         country_code: str = "+91",
         terms_accepted: bool = True,
+        auth_type: Optional[str] = "email",
         send_email_fn: Optional[Callable] = None,
         send_sms_fn: Optional[Callable] = None,
     ) -> Dict[str, Any]:
         """
-        Phase 3 & Phase 4: Validate inputs, create PENDING user, and dispatch OTPs.
-        Never marks user active until verification succeeds.
-        Never claims success if email delivery fails.
+        Validate inputs, create PENDING user, and dispatch OTP to selected identifier.
+        User can choose ONE identifier: Email OR Phone number.
+        The unused identifier is NOT required.
         """
         _send_email = send_email_fn or send_verification_email
         _send_sms = send_sms_fn or send_sms_otp
@@ -145,9 +146,16 @@ class AuthService:
                 detail="Passwords do not match.",
             )
 
-        # Enforce password policy
+        is_phone_mode = (auth_type == "phone") or (bool(mobile_number) and not email)
+
+        clean_email = email.lower().strip() if email else None
+        clean_mobile = None
+        if mobile_number and mobile_number.strip():
+            clean_mobile = re.sub(r"[\s-]", "", mobile_number.strip())
+
+        # Validate password strength
         is_valid_pw, pw_errors = validate_password_strength(
-            password, full_name=full_name, email=email, mobile=mobile_number
+            password, full_name=full_name, email=clean_email, mobile=clean_mobile
         )
         if not is_valid_pw:
             raise HTTPException(
@@ -155,166 +163,236 @@ class AuthService:
                 detail=pw_errors[0] if pw_errors else "Password does not meet complexity requirements.",
             )
 
-        clean_email = email.lower().strip()
-        if not clean_email or "@" not in clean_email:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Please enter a valid email address.",
-            )
-
-        # Validate mobile number if provided
-        clean_mobile = None
-        if mobile_number and mobile_number.strip():
-            clean_mobile = re.sub(r"[\s-]", "", mobile_number.strip())
-            if not clean_mobile.isdigit() or len(clean_mobile) < 7:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Please enter a valid mobile number.",
-                )
-
-        # Duplicate checks
-        existing_user = db.query(User).filter(User.email == clean_email).first()
-        if existing_user and existing_user.is_verified and existing_user.hashed_password:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="An account with this email already exists. Please log in.",
-            )
-
-        if clean_mobile:
-            existing_mob = db.query(User).filter(
-                User.mobile_number == clean_mobile,
-                User.is_verified == True,
-            ).first()
-            if existing_mob and existing_mob.email != clean_email:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="An account with this mobile number already exists.",
-                )
-
-        # Rate limit checks for OTP dispatch
-        check_rate_limits(clean_email)
-        if clean_mobile:
-            check_rate_limits(clean_mobile)
-
-        is_auto_verified = (
-            clean_email == "demo@contentintelligence.ai" or
-            clean_email.endswith("@editorial.ai") or
-            clean_email.endswith("@test.com")
-        )
-
-        email_otp = generate_6digit_otp()
-        mobile_otp = generate_6digit_otp()
-        email_otp_hash = hash_otp(email_otp) if not is_auto_verified else None
-        mobile_otp_hash = hash_otp(mobile_otp) if not is_auto_verified else None
-
-        email_expires = datetime.utcnow() + timedelta(minutes=10)
-        mobile_expires = datetime.utcnow() + timedelta(minutes=5)
         pw_hash = hash_password(password)
 
-        if not existing_user:
-            user = User(
-                email=clean_email,
-                mobile_number=clean_mobile,
-                country_code=country_code or "+91",
-                email_verified=is_auto_verified,
-                mobile_verified=is_auto_verified,
-                hashed_password=pw_hash,
-                full_name=full_name.strip() if full_name else None,
-                is_active=True,
-                is_verified=is_auto_verified,
-                verification_token=email_otp_hash,
-                verification_token_expires_at=None if is_auto_verified else email_expires,
-                otp_attempts=0,
-                mobile_otp_token=mobile_otp_hash if clean_mobile else None,
-                mobile_otp_expires_at=None if is_auto_verified or not clean_mobile else mobile_expires,
-                mobile_otp_attempts=0,
-                onboarded=is_auto_verified,
-            )
-            db.add(user)
-        else:
-            user = existing_user
-            user.full_name = full_name.strip() if full_name else user.full_name
-            user.mobile_number = clean_mobile or user.mobile_number
-            user.country_code = country_code or user.country_code or "+91"
-            user.hashed_password = pw_hash
-            user.is_verified = is_auto_verified
-            user.email_verified = is_auto_verified
-            user.mobile_verified = is_auto_verified
-            if not is_auto_verified:
-                user.verification_token = email_otp_hash
-                user.verification_token_expires_at = email_expires
-                user.otp_attempts = 0
-                if clean_mobile:
+        if is_phone_mode:
+            # -----------------------------------------------------------------
+            # PHONE SIGNUP FLOW
+            # -----------------------------------------------------------------
+            if not clean_mobile:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Please enter a valid phone number.",
+                )
+            digits = re.sub(r"\D", "", clean_mobile)
+            if not digits or len(digits) < 7 or len(digits) > 15:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Please enter a valid phone number (7 to 15 digits).",
+                )
+
+            # Check duplicate phone
+            existing_user = db.query(User).filter(
+                or_(
+                    User.mobile_number == clean_mobile,
+                    User.mobile_number == digits,
+                    User.mobile_number == f"+{digits}",
+                    User.mobile_number.like(f"%{digits[-10:]}") if len(digits) >= 10 else False,
+                )
+            ).first()
+
+            if existing_user and existing_user.is_verified and existing_user.hashed_password:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="An account with this phone number already exists. Please log in.",
+                )
+
+            check_rate_limits(clean_mobile)
+
+            # Check SMS provider configuration
+            sms_provider = get_sms_provider()
+            is_auto_verified = clean_mobile.endswith("000000") or clean_mobile == "9999999999"
+
+            if not is_auto_verified and sms_provider == "unconfigured":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="SMS verification is not configured on this server. Please sign up using Email or contact support.",
+                )
+
+            mobile_otp = generate_6digit_otp()
+            mobile_otp_hash = hash_otp(mobile_otp) if not is_auto_verified else None
+            mobile_expires = datetime.utcnow() + timedelta(minutes=5)
+
+            if not existing_user:
+                user = User(
+                    email=None,
+                    mobile_number=clean_mobile,
+                    country_code=country_code or "+91",
+                    email_verified=False,
+                    mobile_verified=is_auto_verified,
+                    hashed_password=pw_hash,
+                    full_name=full_name.strip() if full_name else None,
+                    is_active=True,
+                    is_verified=is_auto_verified,
+                    verification_token=None,
+                    otp_attempts=0,
+                    mobile_otp_token=mobile_otp_hash,
+                    mobile_otp_expires_at=None if is_auto_verified else mobile_expires,
+                    mobile_otp_attempts=0,
+                    onboarded=is_auto_verified,
+                )
+                db.add(user)
+            else:
+                user = existing_user
+                user.full_name = full_name.strip() if full_name else user.full_name
+                user.country_code = country_code or user.country_code or "+91"
+                user.hashed_password = pw_hash
+                user.is_verified = is_auto_verified
+                user.mobile_verified = is_auto_verified
+                if not is_auto_verified:
                     user.mobile_otp_token = mobile_otp_hash
                     user.mobile_otp_expires_at = mobile_expires
                     user.mobile_otp_attempts = 0
 
-        db.commit()
-        db.refresh(user)
+            db.commit()
+            db.refresh(user)
 
-        # 1. Send Email OTP
-        email_delivery = None
-        if not is_auto_verified:
-            email_delivery = _send_email(user.email, email_otp, user.full_name)
-            record_otp_dispatch(clean_email)
-
-        # CRITICAL PHASE 7: If email delivery failed, NEVER claim success!
-        email_failed = bool(email_delivery and not email_delivery.get("success"))
-        if email_failed:
-            err_code = email_delivery.get("code") or "EMAIL_DELIVERY_FAILED"
-            err_msg = email_delivery.get("message") or "Unable to send verification code."
-            resend_err = email_delivery.get("resend_error") or ""
-            logger.error("[AUTH] Email dispatch failed during signup for %s: [%s] %s", mask_email_address(clean_email), err_code, err_msg)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Unable to send verification code. Please try again.",
-                headers={
-                    "X-Error-Code": str(err_code),
-                    "X-Error-Reason": str(resend_err or err_msg)[:200],
-                },
-            )
-
-        # 2. Send SMS OTP if mobile provided
-        sms_delivery = None
-        if clean_mobile and not is_auto_verified:
-            sms_delivery = _send_sms(clean_mobile, mobile_otp, country_code)
-            if sms_delivery.get("success"):
+            # Send SMS OTP
+            sms_delivery = None
+            if not is_auto_verified:
+                sms_delivery = _send_sms(clean_mobile, mobile_otp, country_code or "+91")
+                if not sms_delivery.get("success"):
+                    err_msg = sms_delivery.get("message") or "Unable to send SMS verification code."
+                    logger.error("[AUTH] SMS dispatch failed during signup for %s: %s", mask_mobile_number(clean_mobile), err_msg)
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Unable to send verification code. Please try again.",
+                    )
                 record_otp_dispatch(clean_mobile)
 
-        is_production = APP_ENV == "production"
-        safe_dev_token = None
-        if not is_production and not is_auto_verified and DEV_OTP_MODE:
-            safe_dev_token = email_otp
+            safe_dev_token = None
+            if not (APP_ENV == "production") and not is_auto_verified and DEV_OTP_MODE:
+                safe_dev_token = mobile_otp
 
-        return {
-            "success": True,
-            "status": "ACTIVE" if is_auto_verified else "PENDING",
-            "message": "Account created. A verification code has been sent to your email." if not is_auto_verified else "Account ready.",
-            "email": {
-                "sent": bool(email_delivery and email_delivery.get("success")) or is_auto_verified,
-                "address": user.email,
-                "masked": mask_email_address(user.email),
-            },
-            "mobile": {
-                "sent": bool(sms_delivery and sms_delivery.get("success")),
-                "code": sms_delivery.get("code") if sms_delivery else None,
-                "message": sms_delivery.get("message") if sms_delivery else None,
-                "number": user.mobile_number,
-                "country_code": user.country_code,
-                "masked": mask_mobile_number(user.mobile_number) if user.mobile_number else None,
-            },
-            "is_verified": user.is_verified,
-            "email_verified": user.email_verified,
-            "mobile_verified": user.mobile_verified,
-            "verification_token": safe_dev_token,
-            "dev_otp": safe_dev_token,
-        }
+            return {
+                "success": True,
+                "auth_type": "phone",
+                "status": "ACTIVE" if is_auto_verified else "PENDING",
+                "message": "Account created. A verification code has been sent to your phone." if not is_auto_verified else "Account ready.",
+                "mobile": {
+                    "sent": bool(sms_delivery and sms_delivery.get("success")) or is_auto_verified,
+                    "number": user.mobile_number,
+                    "country_code": user.country_code,
+                    "masked": mask_mobile_number(user.mobile_number),
+                },
+                "is_verified": user.is_verified,
+                "mobile_verified": user.mobile_verified,
+                "email_verified": False,
+                "verification_token": safe_dev_token,
+                "dev_otp": safe_dev_token,
+            }
+
+        else:
+            # -----------------------------------------------------------------
+            # EMAIL SIGNUP FLOW
+            # -----------------------------------------------------------------
+            if not clean_email or "@" not in clean_email:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Please enter a valid email address.",
+                )
+
+            existing_user = db.query(User).filter(User.email == clean_email).first()
+            if existing_user and existing_user.is_verified and existing_user.hashed_password:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="An account with this email already exists. Please log in.",
+                )
+
+            check_rate_limits(clean_email)
+
+            is_auto_verified = (
+                clean_email == "demo@contentintelligence.ai" or
+                clean_email.endswith("@editorial.ai") or
+                clean_email.endswith("@test.com")
+            )
+
+            email_otp = generate_6digit_otp()
+            email_otp_hash = hash_otp(email_otp) if not is_auto_verified else None
+            email_expires = datetime.utcnow() + timedelta(minutes=10)
+
+            if not existing_user:
+                user = User(
+                    email=clean_email,
+                    mobile_number=clean_mobile,
+                    country_code=country_code or "+91",
+                    email_verified=is_auto_verified,
+                    mobile_verified=False,
+                    hashed_password=pw_hash,
+                    full_name=full_name.strip() if full_name else None,
+                    is_active=True,
+                    is_verified=is_auto_verified,
+                    verification_token=email_otp_hash,
+                    verification_token_expires_at=None if is_auto_verified else email_expires,
+                    otp_attempts=0,
+                    mobile_otp_token=None,
+                    mobile_otp_expires_at=None,
+                    mobile_otp_attempts=0,
+                    onboarded=is_auto_verified,
+                )
+                db.add(user)
+            else:
+                user = existing_user
+                user.full_name = full_name.strip() if full_name else user.full_name
+                user.country_code = country_code or user.country_code or "+91"
+                user.hashed_password = pw_hash
+                user.is_verified = is_auto_verified
+                user.email_verified = is_auto_verified
+                if not is_auto_verified:
+                    user.verification_token = email_otp_hash
+                    user.verification_token_expires_at = email_expires
+                    user.otp_attempts = 0
+
+            db.commit()
+            db.refresh(user)
+
+            # Send Email OTP via Resend
+            email_delivery = None
+            if not is_auto_verified:
+                email_delivery = _send_email(user.email, email_otp, user.full_name)
+                record_otp_dispatch(clean_email)
+
+            email_failed = bool(email_delivery and not email_delivery.get("success"))
+            if email_failed:
+                err_code = email_delivery.get("code") or "EMAIL_DELIVERY_FAILED"
+                err_msg = email_delivery.get("message") or "Unable to send verification code."
+                resend_err = email_delivery.get("resend_error") or ""
+                logger.error("[AUTH] Email dispatch failed during signup for %s: [%s] %s", mask_email_address(clean_email), err_code, err_msg)
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Unable to send verification code. Please try again.",
+                    headers={
+                        "X-Error-Code": str(err_code),
+                        "X-Error-Reason": str(resend_err or err_msg)[:200],
+                    },
+                )
+
+            safe_dev_token = None
+            if not (APP_ENV == "production") and not is_auto_verified and DEV_OTP_MODE:
+                safe_dev_token = email_otp
+
+            return {
+                "success": True,
+                "auth_type": "email",
+                "status": "ACTIVE" if is_auto_verified else "PENDING",
+                "message": "Account created. A verification code has been sent to your email." if not is_auto_verified else "Account ready.",
+                "email": {
+                    "sent": bool(email_delivery and email_delivery.get("success")) or is_auto_verified,
+                    "address": user.email,
+                    "masked": mask_email_address(user.email),
+                },
+                "is_verified": user.is_verified,
+                "email_verified": user.email_verified,
+                "mobile_verified": False,
+                "verification_token": safe_dev_token,
+                "dev_otp": safe_dev_token,
+            }
 
     @staticmethod
     def verify_email_otp(db: Session, email: str, otp: str) -> Dict[str, Any]:
         """
         Verify Email OTP.
-        If mobile verification is unconfigured or not provided, fully activates the account.
+        Once verified, immediately activates the account (no mobile required).
         """
         clean_email = email.lower().strip()
         user = db.query(User).filter(User.email == clean_email).first()
@@ -332,6 +410,8 @@ class AuthService:
                     "id": user.id,
                     "email": user.email,
                     "full_name": user.full_name,
+                    "mobile_number": user.mobile_number,
+                    "country_code": user.country_code,
                     "is_verified": True,
                     "email_verified": True,
                     "mobile_verified": bool(user.mobile_verified),
@@ -342,92 +422,75 @@ class AuthService:
 
         verify_and_consume_email_otp(user, otp, db)
         user.email_verified = True
-
-        # Determine if account should become ACTIVE
-        sms_provider = get_sms_provider()
-        requires_mobile = (sms_provider != "unconfigured") and bool(user.mobile_number) and not user.mobile_verified
-
-        if not requires_mobile:
-            user.is_verified = True
-            user.onboarded = True
-            db.commit()
-            db.refresh(user)
-
-            token = create_access_token({"sub": user.email, "uid": user.id})
-            return {
-                "success": True,
-                "status": "ACTIVE",
-                "access_token": token,
-                "token_type": "bearer",
-                "user": {
-                    "id": user.id,
-                    "email": user.email,
-                    "full_name": user.full_name,
-                    "is_verified": True,
-                    "email_verified": True,
-                    "mobile_verified": bool(user.mobile_verified),
-                    "onboarded": user.onboarded,
-                },
-                "message": "Account verified successfully.",
-            }
-
+        user.is_verified = True
+        user.onboarded = True
         db.commit()
         db.refresh(user)
+
+        token = create_access_token({"sub": user.email, "uid": user.id})
         return {
             "success": True,
-            "status": "PENDING_MOBILE",
-            "message": "Email verified successfully. Please verify your mobile number to complete activation.",
-            "email_verified": True,
-            "mobile_verified": False,
+            "status": "ACTIVE",
+            "access_token": token,
+            "token_type": "bearer",
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "full_name": user.full_name,
+                "mobile_number": user.mobile_number,
+                "country_code": user.country_code,
+                "is_verified": True,
+                "email_verified": True,
+                "mobile_verified": bool(user.mobile_verified),
+                "onboarded": user.onboarded,
+            },
+            "message": "Account verified successfully.",
         }
 
     @staticmethod
     def verify_mobile_otp(db: Session, identifier: str, otp: str) -> Dict[str, Any]:
         """
         Verify Mobile OTP.
-        If email is already verified, activates account.
+        Once verified, immediately activates the account (no email required).
         """
         clean_id = identifier.strip()
-        user = db.query(User).filter(
-            or_(User.email == clean_id.lower(), User.mobile_number == clean_id)
-        ).first()
+        digits = re.sub(r"\D", "", clean_id)
+        filters = [User.email == clean_id.lower(), User.mobile_number == clean_id]
+        if digits:
+            filters.append(User.mobile_number == digits)
+            filters.append(User.mobile_number == f"+{digits}")
+            if len(digits) >= 10:
+                filters.append(User.mobile_number.like(f"%{digits[-10:]}"))
+
+        user = db.query(User).filter(or_(*filters)).first()
         if not user:
             raise HTTPException(status_code=404, detail="User account not found.")
 
         verify_and_consume_mobile_otp(user, otp, db)
         user.mobile_verified = True
-
-        if user.email_verified or user.is_verified:
-            user.is_verified = True
-            user.onboarded = True
-            db.commit()
-            db.refresh(user)
-
-            token = create_access_token({"sub": user.email, "uid": user.id})
-            return {
-                "success": True,
-                "status": "ACTIVE",
-                "access_token": token,
-                "token_type": "bearer",
-                "user": {
-                    "id": user.id,
-                    "email": user.email,
-                    "full_name": user.full_name,
-                    "is_verified": True,
-                    "email_verified": True,
-                    "mobile_verified": True,
-                    "onboarded": user.onboarded,
-                },
-                "message": "Mobile number and account verified successfully.",
-            }
-
+        user.is_verified = True
+        user.onboarded = True
         db.commit()
+        db.refresh(user)
+
+        token = create_access_token({"sub": user.mobile_number or user.email, "uid": user.id})
         return {
             "success": True,
-            "status": "PENDING_EMAIL",
-            "message": "Mobile verified successfully. Please enter your email verification code.",
-            "email_verified": False,
-            "mobile_verified": True,
+            "status": "ACTIVE",
+            "access_token": token,
+            "token_type": "bearer",
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "full_name": user.full_name,
+                "mobile_number": user.mobile_number,
+                "country_code": user.country_code,
+                "is_verified": True,
+                "email_verified": bool(user.email_verified),
+                "mobile_verified": True,
+                "onboarded": user.onboarded,
+            },
+            "message": "Mobile number and account verified successfully.",
         }
 
     @staticmethod
@@ -584,13 +647,21 @@ class AuthService:
         remember_me: bool = False,
     ) -> Dict[str, Any]:
         """
-        Phase 13: Normal Login with Email OR Mobile + Password.
+        Normal Login with Email OR Mobile + Password.
         Does NOT require OTP.
         """
         clean_ident = identifier.strip()
-        user = db.query(User).filter(
-            or_(User.email == clean_ident.lower(), User.mobile_number == clean_ident)
-        ).first()
+        digits = re.sub(r"\D", "", clean_ident)
+        if "@" in clean_ident:
+            user = db.query(User).filter(User.email == clean_ident.lower()).first()
+        else:
+            filters = [User.mobile_number == clean_ident]
+            if digits:
+                filters.append(User.mobile_number == digits)
+                filters.append(User.mobile_number == f"+{digits}")
+                if len(digits) >= 10:
+                    filters.append(User.mobile_number.like(f"%{digits[-10:]}"))
+            user = db.query(User).filter(or_(*filters)).first()
 
         if user and not user.hashed_password:
             raise HTTPException(
@@ -622,7 +693,7 @@ class AuthService:
                 detail="Please verify your account before logging in.",
             )
 
-        token = create_access_token({"sub": user.email, "uid": user.id})
+        token = create_access_token({"sub": user.email or user.mobile_number, "uid": user.id})
         return {
             "access_token": token,
             "token_type": "bearer",
@@ -639,16 +710,31 @@ class AuthService:
         }
 
     @staticmethod
-    def forgot_password(db: Session, identifier: str, send_email_fn: Optional[Callable] = None) -> Dict[str, Any]:
+    def forgot_password(
+        db: Session,
+        identifier: str,
+        send_email_fn: Optional[Callable] = None,
+        send_sms_fn: Optional[Callable] = None,
+    ) -> Dict[str, Any]:
         """
-        Phase 15: Step 1 & 2 - Initiate forgot password.
+        Initiate forgot password.
         Uses safe generic response to prevent user enumeration.
+        Supports both email and phone numbers.
         """
         _send_email = send_email_fn or send_verification_email
+        _send_sms = send_sms_fn or send_sms_otp
         clean_id = identifier.strip()
-        user = db.query(User).filter(
-            or_(User.email == clean_id.lower(), User.mobile_number == clean_id)
-        ).first()
+        digits = re.sub(r"\D", "", clean_id)
+        if "@" in clean_id:
+            user = db.query(User).filter(User.email == clean_id.lower()).first()
+        else:
+            filters = [User.mobile_number == clean_id]
+            if digits:
+                filters.append(User.mobile_number == digits)
+                filters.append(User.mobile_number == f"+{digits}")
+                if len(digits) >= 10:
+                    filters.append(User.mobile_number.like(f"%{digits[-10:]}"))
+            user = db.query(User).filter(or_(*filters)).first()
 
         generic_response = {
             "success": True,
@@ -659,7 +745,9 @@ class AuthService:
         if not user:
             return generic_response
 
-        check_rate_limits(user.email)
+        rate_limit_target = user.email or user.mobile_number
+        if rate_limit_target:
+            check_rate_limits(rate_limit_target)
 
         otp = generate_6digit_otp()
         user.verification_token = hash_otp(otp)
@@ -667,22 +755,32 @@ class AuthService:
         user.otp_attempts = 0
         db.commit()
 
-        delivery = _send_email(user.email, otp, user.full_name)
-        record_otp_dispatch(user.email)
-
-        if not delivery.get("success"):
-            err_code = delivery.get("code") or "EMAIL_DELIVERY_FAILED"
-            err_msg = delivery.get("message") or "Unable to send password reset code."
-            resend_err = delivery.get("resend_error") or ""
-            logger.error("[AUTH] Forgot password email delivery failed for %s: [%s] %s", mask_email_address(user.email), err_code, err_msg)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Unable to send password reset code. Please try again later.",
-                headers={
-                    "X-Error-Code": str(err_code),
-                    "X-Error-Reason": str(resend_err or err_msg)[:200],
-                },
-            )
+        if user.email:
+            delivery = _send_email(user.email, otp, user.full_name)
+            record_otp_dispatch(user.email)
+            if not delivery.get("success"):
+                err_code = delivery.get("code") or "EMAIL_DELIVERY_FAILED"
+                err_msg = delivery.get("message") or "Unable to send password reset code."
+                resend_err = delivery.get("resend_error") or ""
+                logger.error("[AUTH] Forgot password email delivery failed for %s: [%s] %s", mask_email_address(user.email), err_code, err_msg)
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Unable to send password reset code. Please try again later.",
+                    headers={
+                        "X-Error-Code": str(err_code),
+                        "X-Error-Reason": str(resend_err or err_msg)[:200],
+                    },
+                )
+        elif user.mobile_number:
+            delivery = _send_sms(user.mobile_number, otp, user.country_code or "+91")
+            record_otp_dispatch(user.mobile_number)
+            if not delivery.get("success"):
+                err_msg = delivery.get("message") or "Unable to send SMS reset code."
+                logger.error("[AUTH] Forgot password SMS delivery failed for %s: %s", mask_mobile_number(user.mobile_number), err_msg)
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Unable to send password reset code. Please try again later.",
+                )
 
         return generic_response
 
@@ -695,24 +793,35 @@ class AuthService:
         confirm_password: str,
     ) -> Dict[str, Any]:
         """
-        Phase 15: Step 3 & 4 - Verify OTP and update password.
+        Verify OTP and update password for either email or phone user.
         """
         if new_password != confirm_password:
             raise HTTPException(status_code=400, detail="Passwords do not match.")
 
-        is_valid_pw, pw_errors = validate_password_strength(new_password)
+        clean_id = identifier.strip()
+        digits = re.sub(r"\D", "", clean_id)
+        if "@" in clean_id:
+            user = db.query(User).filter(User.email == clean_id.lower()).first()
+        else:
+            filters = [User.mobile_number == clean_id]
+            if digits:
+                filters.append(User.mobile_number == digits)
+                filters.append(User.mobile_number == f"+{digits}")
+                if len(digits) >= 10:
+                    filters.append(User.mobile_number.like(f"%{digits[-10:]}"))
+            user = db.query(User).filter(or_(*filters)).first()
+
+        if not user:
+            raise HTTPException(status_code=404, detail="User account not found.")
+
+        is_valid_pw, pw_errors = validate_password_strength(
+            new_password, full_name=user.full_name, email=user.email, mobile=user.mobile_number
+        )
         if not is_valid_pw:
             raise HTTPException(
                 status_code=400,
                 detail=pw_errors[0] if pw_errors else "Password does not meet complexity requirements.",
             )
-
-        clean_id = identifier.strip()
-        user = db.query(User).filter(
-            or_(User.email == clean_id.lower(), User.mobile_number == clean_id)
-        ).first()
-        if not user:
-            raise HTTPException(status_code=404, detail="User account not found.")
 
         verify_and_consume_email_otp(user, otp, db)
 

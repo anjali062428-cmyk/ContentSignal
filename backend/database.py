@@ -66,6 +66,50 @@ def ensure_columns():
                     conn.execute(text("ALTER TABLE users ADD COLUMN mobile_otp_attempts INTEGER DEFAULT 0"))
                 conn.commit()
 
+                # Ensure email column is nullable to allow phone-only user registrations
+                try:
+                    if DATABASE_URL.startswith("sqlite"):
+                        raw_cols = {c["name"]: c for c in inspector.get_columns("users")}
+                        if "email" in raw_cols and not raw_cols["email"]["nullable"]:
+                            conn.execute(text("PRAGMA foreign_keys=off;"))
+                            col_names = [c["name"] for c in inspector.get_columns("users")]
+                            col_list_str = ", ".join(col_names)
+                            conn.execute(text("""
+                                CREATE TABLE users_temp (
+                                    id INTEGER PRIMARY KEY,
+                                    email VARCHAR(255) NULL,
+                                    mobile_number VARCHAR(32) NULL,
+                                    country_code VARCHAR(8) DEFAULT '+91',
+                                    email_verified BOOLEAN DEFAULT 0,
+                                    mobile_verified BOOLEAN DEFAULT 0,
+                                    hashed_password VARCHAR(255) NOT NULL,
+                                    full_name VARCHAR(255) NULL,
+                                    is_active BOOLEAN DEFAULT 1,
+                                    is_verified BOOLEAN DEFAULT 1,
+                                    verification_token VARCHAR(255) NULL,
+                                    verification_token_expires_at DATETIME NULL,
+                                    otp_attempts INTEGER DEFAULT 0,
+                                    mobile_otp_token VARCHAR(255) NULL,
+                                    mobile_otp_expires_at DATETIME NULL,
+                                    mobile_otp_attempts INTEGER DEFAULT 0,
+                                    onboarded BOOLEAN DEFAULT 1,
+                                    created_at DATETIME
+                                );
+                            """))
+                            conn.execute(text(f"INSERT INTO users_temp ({col_list_str}) SELECT {col_list_str} FROM users;"))
+                            conn.execute(text("DROP TABLE users;"))
+                            conn.execute(text("ALTER TABLE users_temp RENAME TO users;"))
+                            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email ON users (email);"))
+                            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_mobile_number ON users (mobile_number);"))
+                            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_id ON users (id);"))
+                            conn.execute(text("PRAGMA foreign_keys=on;"))
+                            conn.commit()
+                    else:
+                        conn.execute(text("ALTER TABLE users ALTER COLUMN email DROP NOT NULL;"))
+                        conn.commit()
+                except Exception:
+                    pass
+
             # 3. Datasets table migrations
             if "datasets" in tables:
                 ds_cols = [c["name"] for c in inspector.get_columns("datasets")]

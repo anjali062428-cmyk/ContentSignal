@@ -9,6 +9,7 @@ from jose import jwt, JWTError
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 
 from backend.config import JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRATION_MINUTES
 from backend.database import get_db
@@ -39,7 +40,7 @@ def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: Session = Depends(get_db),
 ) -> User:
-    """Validates JWT bearer token and retrieves user."""
+    """Validates JWT bearer token and retrieves user by uid, email, or mobile number."""
     if not credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -49,13 +50,19 @@ def get_current_user(
     token = credentials.credentials
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        email: str = payload.get("sub")
-        if not email:
+        sub: str = payload.get("sub")
+        uid = payload.get("uid")
+        if not sub and not uid:
             raise HTTPException(status_code=401, detail="Invalid token subject")
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-    user = db.query(User).filter(User.email == email).first()
+    user = None
+    if uid:
+        user = db.query(User).filter(User.id == uid).first()
+    if not user and sub:
+        user = db.query(User).filter(or_(User.email == sub, User.mobile_number == sub)).first()
+
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
     if not user.is_active:
@@ -73,10 +80,15 @@ def get_optional_current_user(
     token = credentials.credentials
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        email: str = payload.get("sub")
-        if not email:
+        sub: str = payload.get("sub")
+        uid = payload.get("uid")
+        if not sub and not uid:
             return None
-        user = db.query(User).filter(User.email == email).first()
+        user = None
+        if uid:
+            user = db.query(User).filter(User.id == uid).first()
+        if not user and sub:
+            user = db.query(User).filter(or_(User.email == sub, User.mobile_number == sub)).first()
         return user if (user and user.is_active) else None
     except JWTError:
         return None

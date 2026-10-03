@@ -633,4 +633,131 @@ def test_test_email_allows_delivered_resend_dev_in_production():
         assert res_blocked.status_code == 403
 
 
+def test_decoupled_email_signup_no_phone_required(db_session):
+    """Verify that email signup requires NO phone number and activates immediately upon email OTP verification."""
+    unique_email = f"email_only_{uuid.uuid4().hex[:8]}@example.com"
+    mock_delivery = {"success": True, "provider": "resend", "delivery_id": "test_deliv_email"}
+
+    with patch("backend.auth_service.send_verification_email", return_value=mock_delivery):
+        # 1. Initiate signup without mobile number
+        init_res = client.post("/api/auth/signup-initiate", json={
+            "full_name": "Email Only User",
+            "auth_type": "email",
+            "email": unique_email,
+            "password": "Password123!",
+            "confirm_password": "Password123!",
+            "terms_accepted": True,
+        })
+        assert init_res.status_code == 200
+        init_data = init_res.json()
+        assert init_data["success"] is True
+        assert init_data["email"]["sent"] is True
+
+        user = db_session.query(User).filter(User.email == unique_email).first()
+        assert user is not None
+        assert user.mobile_number is None
+        assert user.is_verified is False
+
+        # Set known OTP
+        known_otp = "852963"
+        user.verification_token = hash_otp(known_otp)
+        user.verification_token_expires_at = datetime.utcnow() + timedelta(minutes=10)
+        db_session.commit()
+
+        # 2. Verify email OTP -> auto activates
+        verify_res = client.post("/api/auth/signup-verify", json={
+            "email": unique_email,
+            "otp": known_otp,
+        })
+        assert verify_res.status_code == 200
+        verify_data = verify_res.json()
+        assert verify_data["success"] is True
+        assert "access_token" in verify_data
+        assert verify_data["user"]["is_verified"] is True
+        assert verify_data["user"]["email_verified"] is True
+        assert verify_data["user"]["mobile_verified"] is False
+
+
+def test_decoupled_phone_signup_unconfigured_sms_rejected(db_session):
+    """Verify that phone signup when SMS is unconfigured returns a clear 400 error without faking success."""
+    unique_phone = f"98{uuid.uuid4().int % 100000000:08d}"
+    with patch("backend.auth_service.get_sms_provider", return_value="unconfigured"):
+        res = client.post("/api/auth/signup-initiate", json={
+            "full_name": "Phone Unconfigured User",
+            "auth_type": "phone",
+            "mobile_number": unique_phone,
+            "country_code": "+91",
+            "password": "Password123!",
+            "confirm_password": "Password123!",
+            "terms_accepted": True,
+        })
+        assert res.status_code == 400
+        assert "SMS verification is not configured" in res.json()["detail"]
+
+
+def test_decoupled_phone_signup_and_verify_success(db_session):
+    """Verify phone signup with mock SMS provider creates user with email=None and activates upon SMS OTP verification."""
+    unique_phone = f"97{uuid.uuid4().int % 100000000:08d}"
+    mock_sms_delivery = {"success": True, "provider": "mock_twilio", "sid": "SMtest123"}
+
+    with patch("backend.auth_service.get_sms_provider", return_value="twilio"), \
+         patch("backend.routers.auth.send_sms_otp", return_value=mock_sms_delivery), \
+         patch("backend.auth_service.send_sms_otp", return_value=mock_sms_delivery):
+
+        # 1. Initiate phone signup without email
+        init_res = client.post("/api/auth/signup-initiate", json={
+            "full_name": "Phone Only User",
+            "auth_type": "phone",
+            "mobile_number": unique_phone,
+            "country_code": "+91",
+            "password": "Password123!",
+            "confirm_password": "Password123!",
+            "terms_accepted": True,
+        })
+        assert init_res.status_code == 200
+        init_data = init_res.json()
+        assert init_data["success"] is True
+        assert init_data["auth_type"] == "phone"
+
+        user = db_session.query(User).filter(User.mobile_number == unique_phone).first()
+        assert user is not None
+        assert user.email is None
+        assert user.is_verified is False
+
+        # Set known mobile OTP
+        known_otp = "741258"
+        user.mobile_otp_token = hash_otp(known_otp)
+        user.mobile_otp_expires_at = datetime.utcnow() + timedelta(minutes=5)
+        db_session.commit()
+
+        # 2. Verify mobile OTP -> auto activates
+        verify_res = client.post("/api/auth/signup-verify-mobile", json={
+            "identifier": unique_phone,
+            "mobile_number": unique_phone,
+            "otp": known_otp,
+        })
+        assert verify_res.status_code == 200
+        verify_data = verify_res.json()
+        assert verify_data["success"] is True
+        assert "access_token" in verify_data
+        assert verify_data["user"]["is_verified"] is True
+        assert verify_data["user"]["mobile_verified"] is True
+
+        # 3. Test Login with phone (with and without country code)
+        login_res1 = client.post("/api/auth/login", json={
+            "identifier": unique_phone,
+            "password": "Password123!",
+        })
+        assert login_res1.status_code == 200
+        assert "access_token" in login_res1.json()
+
+        login_res2 = client.post("/api/auth/login", json={
+            "identifier": f"+91{unique_phone}",
+            "password": "Password123!",
+        })
+        assert login_res2.status_code == 200
+        assert "access_token" in login_res2.json()
+
+
+
 

@@ -13,7 +13,7 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    email = Column(String(255), unique=True, index=True, nullable=False)
+    email = Column(String(255), unique=True, index=True, nullable=True)
     mobile_number = Column(String(32), unique=True, index=True, nullable=True)
     country_code = Column(String(8), default="+91", nullable=True)
     email_verified = Column(Boolean, default=False, nullable=True)

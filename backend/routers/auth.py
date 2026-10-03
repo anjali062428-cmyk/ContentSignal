@@ -119,7 +119,7 @@ def _verify_and_consume_otp(user: User, submitted_otp: str, db: Session) -> None
 
 @router.post("/signup-initiate")
 def signup_initiate(req: SignUpInitiateRequest, db: Session = Depends(get_db)):
-    """Phase 3 & 4: Initiate user sign up with pending state, password policy, and OTP dispatch."""
+    """Initiate user sign up with pending state, password policy, and OTP dispatch for email or phone."""
     return AuthService.initiate_signup(
         db=db,
         full_name=req.full_name,
@@ -129,6 +129,7 @@ def signup_initiate(req: SignUpInitiateRequest, db: Session = Depends(get_db)):
         mobile_number=req.mobile_number,
         country_code=req.country_code or "+91",
         terms_accepted=req.terms_accepted if req.terms_accepted is not None else True,
+        auth_type=req.auth_type or ("phone" if req.mobile_number and not req.email else "email"),
         send_email_fn=send_verification_email,
         send_sms_fn=send_sms_otp,
     )
@@ -136,40 +137,48 @@ def signup_initiate(req: SignUpInitiateRequest, db: Session = Depends(get_db)):
 
 @router.post("/signup-verify")
 def signup_verify(req: SignUpVerifyRequest, db: Session = Depends(get_db)):
-    """Phase 5 & 11: Verify signup Email OTP and activate account."""
-    return AuthService.verify_email_otp(db, req.email, req.otp)
+    """Verify signup Email or Mobile OTP and activate account."""
+    ident = (req.email or req.mobile_number or req.identifier or "").strip()
+    if "@" in ident:
+        return AuthService.verify_email_otp(db, ident, req.otp)
+    else:
+        return AuthService.verify_mobile_otp(db, ident, req.otp)
 
 
 @router.post("/signup-verify-email")
 def signup_verify_email(req: SignUpVerifyRequest, db: Session = Depends(get_db)):
-    """Phase 11: Dedicated endpoint to verify Email OTP."""
-    return AuthService.verify_email_otp(db, req.email, req.otp)
+    """Dedicated endpoint to verify Email OTP."""
+    ident = (req.email or req.identifier or "").strip()
+    return AuthService.verify_email_otp(db, ident, req.otp)
 
 
 @router.post("/signup-verify-mobile")
 def signup_verify_mobile(req: VerifyMobileOTPRequest, db: Session = Depends(get_db)):
-    """Phase 11: Dedicated endpoint to verify Mobile SMS OTP."""
-    return AuthService.verify_mobile_otp(db, req.identifier, req.otp)
+    """Dedicated endpoint to verify Mobile SMS OTP."""
+    ident = (req.identifier or req.mobile_number or req.email or "").strip()
+    return AuthService.verify_mobile_otp(db, ident, req.otp)
 
 
 @router.post("/resend-email-otp")
 def resend_email_otp(req: ResendVerificationRequest, db: Session = Depends(get_db)):
-    """Phase 5: Resend Email OTP with 60-second cooldown."""
+    """Resend Email OTP with 60-second cooldown."""
     return AuthService.resend_email_otp(db, req.email, send_email_fn=send_verification_email)
 
 
 @router.post("/resend-mobile-otp")
 def resend_mobile_otp(req: ResendMobileOTPRequest, db: Session = Depends(get_db)):
-    """Phase 6: Resend Mobile OTP with 60-second cooldown."""
-    return AuthService.resend_mobile_otp(db, req.identifier, send_sms_fn=send_sms_otp)
+    """Resend Mobile OTP with 60-second cooldown."""
+    ident = (req.identifier or req.mobile_number or req.email or "").strip()
+    return AuthService.resend_mobile_otp(db, ident, send_sms_fn=send_sms_otp)
 
 
 @router.post("/change-contact")
 def change_contact(req: ChangeContactRequest, db: Session = Depends(get_db)):
-    """Phase 12: Change pending email or mobile contact info and invalidate old OTP."""
+    """Change pending email or mobile contact info and invalidate old OTP."""
+    current_target = (req.current_email or req.current_identifier or "").strip()
     return AuthService.change_contact(
         db=db,
-        current_email=req.current_email,
+        current_email=current_target,
         new_email=req.new_email,
         new_mobile=req.new_mobile,
         country_code=req.country_code or "+91",
@@ -179,8 +188,8 @@ def change_contact(req: ChangeContactRequest, db: Session = Depends(get_db)):
 
 @router.post("/login", response_model=TokenResponse)
 def login(req: UserLoginRequest, db: Session = Depends(get_db)):
-    """Phase 13: Normal Login with Email OR Mobile + Password (No OTP required)."""
-    ident = (req.identifier or req.email or "").strip()
+    """Normal Login with Email OR Mobile + Password (No OTP required)."""
+    ident = (req.identifier or req.email or req.mobile_number or "").strip()
     if not ident:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -191,7 +200,7 @@ def login(req: UserLoginRequest, db: Session = Depends(get_db)):
 
 @router.post("/login-otp-initiate")
 def login_otp_initiate(req: LoginOTPInitiateRequest, db: Session = Depends(get_db)):
-    """Phase 14: Optional Login with OTP - Request OTP."""
+    """Optional Login with OTP - Request OTP."""
     ident = req.identifier.strip()
     user = db.query(User).filter(
         User.email == ident.lower() if "@" in ident else User.mobile_number == ident
@@ -222,7 +231,7 @@ def login_otp_initiate(req: LoginOTPInitiateRequest, db: Session = Depends(get_d
 
 @router.post("/login-otp-verify")
 def login_otp_verify(req: LoginOTPVerifyRequest, db: Session = Depends(get_db)):
-    """Phase 14: Optional Login with OTP - Verify OTP & Authenticate."""
+    """Optional Login with OTP - Verify OTP & Authenticate."""
     ident = req.identifier.strip()
     user = db.query(User).filter(
         User.email == ident.lower() if "@" in ident else User.mobile_number == ident
@@ -231,7 +240,7 @@ def login_otp_verify(req: LoginOTPVerifyRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="No registered account found.")
 
     verify_and_consume_email_otp(user, req.otp, db)
-    token = create_access_token({"sub": user.email, "uid": user.id})
+    token = create_access_token({"sub": user.email or user.mobile_number, "uid": user.id})
     return {
         "access_token": token,
         "token_type": "bearer",
@@ -239,6 +248,8 @@ def login_otp_verify(req: LoginOTPVerifyRequest, db: Session = Depends(get_db)):
             "id": user.id,
             "email": user.email,
             "full_name": user.full_name,
+            "mobile_number": user.mobile_number,
+            "country_code": user.country_code,
             "is_verified": user.is_verified,
             "onboarded": user.onboarded,
         },
@@ -247,17 +258,17 @@ def login_otp_verify(req: LoginOTPVerifyRequest, db: Session = Depends(get_db)):
 
 @router.post("/forgot-password")
 def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
-    """Phase 15: Forgot password OTP initiation."""
-    ident = (req.identifier or req.email or "").strip()
+    """Forgot password OTP initiation."""
+    ident = (req.identifier or req.email or req.mobile_number or "").strip()
     if not ident:
         return {"success": True, "message": "If an account exists, a reset code has been sent."}
-    return AuthService.forgot_password(db, ident, send_email_fn=send_verification_email)
+    return AuthService.forgot_password(db, ident, send_email_fn=send_verification_email, send_sms_fn=send_sms_otp)
 
 
 @router.post("/reset-password")
 def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
-    """Phase 15: Reset password with OTP."""
-    ident = (req.identifier or req.email or "").strip()
+    """Reset password with OTP."""
+    ident = (req.identifier or req.email or req.mobile_number or "").strip()
     if not ident:
         raise HTTPException(status_code=400, detail="Email or mobile is required.")
     return AuthService.reset_password(db, ident, req.otp, req.new_password, req.confirm_password)

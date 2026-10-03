@@ -3,6 +3,7 @@ Backend Configuration.
 """
 import os
 from pathlib import Path
+from typing import Optional
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -37,6 +38,9 @@ JWT_EXPIRATION_MINUTES = 60 * 24  # 24 hours
 # Development OTP Mode: Default false. When false, OTP is NEVER returned in API or shown in UI.
 DEV_OTP_MODE = os.getenv("DEV_OTP_MODE", "false").lower() in ("true", "1", "yes")
 
+# Email Provider Preference: 'smtp', 'resend', or auto-detect
+EMAIL_PROVIDER = (os.getenv("EMAIL_PROVIDER") or "").strip().lower()
+
 # Email Provider Configuration: Resend API
 RESEND_API_KEY = (os.getenv("RESEND_API_KEY") or "").strip()
 
@@ -69,7 +73,7 @@ _raw_configured_from = (
 
 PUBLIC_EMAIL_DOMAINS = ("gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "icloud.com", "aol.com")
 
-def get_effective_email_from(provider: str) -> str:
+def get_effective_email_from(provider: str, custom_sender: Optional[str] = None) -> str:
     """
     Deterministic email sender resolution.
     If provider is Resend and the configured sender is a public webmail domain (e.g. gmail.com)
@@ -77,14 +81,51 @@ def get_effective_email_from(provider: str) -> str:
     If a verified custom domain or custom address is provided, use that.
     For SMTP or local dev, return the configured sender.
     """
+    raw_from = custom_sender or _raw_configured_from
+    if not raw_from:
+        raw_from = (
+            os.getenv("EMAIL_FROM") or 
+            os.getenv("SMTP_FROM") or 
+            os.getenv("SMTP_USER") or 
+            os.getenv("RESEND_FROM") or 
+            os.getenv("EMAIL_USER") or 
+            ""
+        ).strip()
+
     if provider == "resend":
-        if _raw_configured_from and "@" in _raw_configured_from:
-            domain = _raw_configured_from.split("@")[-1].lower()
+        if raw_from and "@" in raw_from:
+            domain = raw_from.split("@")[-1].lower()
             if domain in PUBLIC_EMAIL_DOMAINS:
                 return "onboarding@resend.dev"
-            return _raw_configured_from
+            return raw_from
         return "onboarding@resend.dev"
-    return _raw_configured_from or "noreply@contentsignal.ai"
 
-EMAIL_FROM = get_effective_email_from("resend" if RESEND_API_KEY else "smtp")
+    return raw_from or "noreply@contentsignal.ai"
+
+def _determine_initial_provider() -> str:
+    pref = EMAIL_PROVIDER.strip().lower()
+    if pref in ("smtp", "resend"):
+        return pref
+    if RESEND_API_KEY:
+        return "resend"
+    if SMTP_HOST:
+        return "smtp"
+    return "smtp"
+
+EMAIL_FROM = get_effective_email_from(_determine_initial_provider())
+
+# =========================================================================
+# SMS Provider Configuration (Architecture Ready for Twilio / MSG91)
+# =========================================================================
+SMS_PROVIDER = (os.getenv("SMS_PROVIDER") or "").strip().lower()
+
+# Twilio SMS
+TWILIO_ACCOUNT_SID = (os.getenv("TWILIO_ACCOUNT_SID") or "").strip()
+TWILIO_AUTH_TOKEN = (os.getenv("TWILIO_AUTH_TOKEN") or "").strip()
+TWILIO_FROM_NUMBER = (os.getenv("TWILIO_FROM_NUMBER") or os.getenv("TWILIO_PHONE_NUMBER") or "").strip()
+
+# MSG91 (India DLT Compliant SMS)
+MSG91_AUTH_KEY = (os.getenv("MSG91_AUTH_KEY") or "").strip()
+MSG91_SENDER_ID = (os.getenv("MSG91_SENDER_ID") or "").strip()
+MSG91_TEMPLATE_ID = (os.getenv("MSG91_TEMPLATE_ID") or "").strip()
 

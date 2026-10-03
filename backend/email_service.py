@@ -1,9 +1,21 @@
 """
 Email Delivery Service for ContentSignal.
-Supports Resend API, SMTP, and secure development fallback.
+Provides a clean provider abstraction:
+EmailProvider
+├── SMTPProvider
+├── ResendProvider
+└── NullEmailProvider
+
+Features:
+- Explicit provider selection (EMAIL_PROVIDER=smtp or EMAIL_PROVIDER=resend).
+- No silent fallback between providers.
+- Real delivery verification.
+- Safe diagnostic test-email endpoint.
 """
+from abc import ABC, abstractmethod
 import logging
 import smtplib
+import sys
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import make_msgid, formatdate
@@ -11,19 +23,40 @@ from typing import Dict, Any, Optional
 import httpx
 
 from backend.config import (
-    RESEND_API_KEY,
-    SMTP_HOST,
-    SMTP_PORT,
-    SMTP_USER,
-    SMTP_PASSWORD,
-    SMTP_USE_TLS,
-    SMTP_USE_SSL,
-    EMAIL_FROM,
-    EMAIL_FROM_NAME,
-    APP_ENV,
-    DEV_OTP_MODE,
+    RESEND_API_KEY as _CFG_RESEND_KEY,
+    SMTP_HOST as _CFG_SMTP_HOST,
+    SMTP_PORT as _CFG_SMTP_PORT,
+    SMTP_USER as _CFG_SMTP_USER,
+    SMTP_PASSWORD as _CFG_SMTP_PASS,
+    SMTP_USE_TLS as _CFG_USE_TLS,
+    SMTP_USE_SSL as _CFG_USE_SSL,
+    EMAIL_FROM as _CFG_EMAIL_FROM,
+    EMAIL_FROM_NAME as _CFG_FROM_NAME,
+    APP_ENV as _CFG_APP_ENV,
+    DEV_OTP_MODE as _CFG_DEV_OTP_MODE,
+    EMAIL_PROVIDER as _CFG_EMAIL_PROVIDER,
     get_effective_email_from,
 )
+
+try:
+    from backend.sms_service import get_sms_provider_status
+except ImportError:
+    def get_sms_provider_status():
+        return {"provider": "unconfigured", "is_configured": False}
+
+# Module-level variables for test patch compatibility
+RESEND_API_KEY = _CFG_RESEND_KEY
+SMTP_HOST = _CFG_SMTP_HOST
+SMTP_PORT = _CFG_SMTP_PORT
+SMTP_USER = _CFG_SMTP_USER
+SMTP_PASSWORD = _CFG_SMTP_PASS
+SMTP_USE_TLS = _CFG_USE_TLS
+SMTP_USE_SSL = _CFG_USE_SSL
+EMAIL_FROM = _CFG_EMAIL_FROM
+EMAIL_FROM_NAME = _CFG_FROM_NAME
+APP_ENV = _CFG_APP_ENV
+DEV_OTP_MODE = _CFG_DEV_OTP_MODE
+EMAIL_PROVIDER = _CFG_EMAIL_PROVIDER
 
 logger = logging.getLogger("contentsignal.email")
 if not logger.handlers:
@@ -46,143 +79,9 @@ def mask_email_address(email: str) -> str:
     return f"{masked_local}@{domain}"
 
 
-def get_email_provider() -> str:
-    """Determine the active email provider based on configuration."""
-    if RESEND_API_KEY and RESEND_API_KEY.strip():
-        return "resend"
-    if SMTP_HOST and SMTP_HOST.strip():
-        return "smtp"
-    if DEV_OTP_MODE or APP_ENV == "development":
-        return "development_fallback"
-    return "unconfigured"
-
-
-def get_email_provider_status() -> Dict[str, Any]:
-    """Return non-sensitive status information about email configuration."""
-    provider = get_email_provider()
-    effective_from = get_effective_email_from(provider)
-    sender = f"{EMAIL_FROM_NAME} <{effective_from}>" if EMAIL_FROM_NAME else effective_from
-    return {
-        "provider": provider,
-        "is_configured": provider in ("resend", "smtp"),
-        "sender": sender,
-        "environment": APP_ENV,
-        "smtp_host_configured": bool(SMTP_HOST),
-        "resend_configured": bool(RESEND_API_KEY),
-    }
-
-
-def verify_smtp_connection() -> Dict[str, Any]:
-    """
-    Verify SMTP connection and authentication without leaking credentials.
-    Emits standardized safe log messages:
-      [EMAIL] transporter: SUCCESS
-    or:
-      [EMAIL] transporter: FAILED
-      [EMAIL] error code: <safe code>
-      [EMAIL] error message: <safe message>
-    """
-    if not SMTP_HOST:
-        logger.error("[EMAIL] transporter: FAILED")
-        logger.error("[EMAIL] error code: SMTP_NOT_CONFIGURED")
-        logger.error("[EMAIL] error message: SMTP_HOST is not set in environment (.env).")
-        return {
-            "success": False,
-            "code": "SMTP_NOT_CONFIGURED",
-            "message": "SMTP_HOST is not configured in .env",
-            "missing_variables": ["SMTP_HOST", "SMTP_USER", "SMTP_PASS"],
-        }
-
-    missing = []
-    if not SMTP_USER:
-        missing.append("SMTP_USER")
-    if not SMTP_PASSWORD:
-        missing.append("SMTP_PASS")
-    if missing:
-        logger.error("[EMAIL] transporter: FAILED")
-        logger.error("[EMAIL] error code: MISSING_CREDENTIALS")
-        logger.error("[EMAIL] error message: Missing required SMTP credentials: %s", ", ".join(missing))
-        return {
-            "success": False,
-            "code": "MISSING_CREDENTIALS",
-            "message": f"Missing required SMTP credentials: {', '.join(missing)}",
-            "missing_variables": missing,
-        }
-
-    logger.info(
-        "[EMAIL] Testing SMTP connection to %s:%s (SSL=%s, TLS=%s)...",
-        SMTP_HOST,
-        SMTP_PORT,
-        SMTP_USE_SSL,
-        SMTP_USE_TLS,
-    )
-    server = None
-    try:
-        use_ssl = (int(SMTP_PORT) == 465) or (SMTP_USE_SSL and int(SMTP_PORT) != 587)
-        if use_ssl:
-            server = smtplib.SMTP_SSL(SMTP_HOST.strip(), int(SMTP_PORT), timeout=10)
-        else:
-            server = smtplib.SMTP(SMTP_HOST.strip(), int(SMTP_PORT), timeout=10)
-            if SMTP_USE_TLS:
-                server.starttls()
-
-        clean_pw = SMTP_PASSWORD
-        if "gmail.com" in SMTP_HOST.lower():
-            clean_pw = clean_pw.replace(" ", "")
-
-        server.login(SMTP_USER, clean_pw)
-        server.quit()
-        server = None
-        logger.info("[EMAIL] transporter: SUCCESS")
-        return {
-            "success": True,
-            "code": "OK",
-            "message": "SMTP transporter connection and authentication verified successfully.",
-            "host": SMTP_HOST,
-            "port": SMTP_PORT,
-            "secure": SMTP_USE_SSL,
-            "sender": mask_email_address(SMTP_USER),
-        }
-    except smtplib.SMTPAuthenticationError as e:
-        err_text = e.smtp_error.decode(errors="ignore") if isinstance(e.smtp_error, bytes) else str(e)
-        logger.error("[EMAIL] transporter: FAILED")
-        logger.error("[EMAIL] error code: EAUTH (535)")
-        logger.error("[EMAIL] error message: Authentication failed for sender. Check SMTP_USER and Google App Password.")
-        return {
-            "success": False,
-            "code": "EAUTH",
-            "message": f"SMTP Authentication failed (Check SMTP_USER and Google App Password): {err_text}",
-        }
-    except (smtplib.SMTPConnectError, TimeoutError, ConnectionRefusedError, OSError) as e:
-        logger.error("[EMAIL] transporter: FAILED")
-        logger.error("[EMAIL] error code: ECONNECTION")
-        logger.error("[EMAIL] error message: Connection failed to %s:%s - %s", SMTP_HOST, SMTP_PORT, type(e).__name__)
-        return {
-            "success": False,
-            "code": "ECONNECTION",
-            "message": f"Failed to connect to SMTP server at {SMTP_HOST}:{SMTP_PORT} ({type(e).__name__})",
-        }
-    except Exception as e:
-        logger.error("[EMAIL] transporter: FAILED")
-        logger.error("[EMAIL] error code: %s", type(e).__name__)
-        logger.error("[EMAIL] error message: %s", str(e))
-        return {
-            "success": False,
-            "code": type(e).__name__,
-            "message": f"SMTP verification error: {str(e)}",
-        }
-    finally:
-        if server:
-            try:
-                server.close()
-            except Exception:
-                pass
-
-
 def _build_email_content(to_email: str, verification_code: str, full_name: Optional[str] = None) -> Dict[str, str]:
     """Construct plain-text and HTML verification email templates."""
     greeting_name = full_name.strip() if full_name and full_name.strip() else "there"
-    
     subject = f"Your ContentSignal Verification Code: {verification_code}"
     
     text_content = f"""Hello {greeting_name},
@@ -193,7 +92,7 @@ Your 6-digit confirmation code is:
 
 {verification_code}
 
-This code will expire in 24 hours. Enter this code on the verification screen to activate your account.
+This code will expire in 10 minutes. Enter this code on the verification screen to activate your account.
 
 If you did not request this code, please ignore this email.
 
@@ -248,7 +147,7 @@ The ContentSignal Team
           <tr>
             <td style="color: #94a3b8; font-size: 13px; line-height: 20px; text-align: center; border-top: 1px solid #1e293b; padding-top: 20px;">
               <p style="margin: 0 0 8px 0;">
-                This code will expire in <strong>24 hours</strong>.
+                This code will expire in <strong>10 minutes</strong>.
               </p>
               <p style="margin: 0;">
                 If you did not request this email, no action is needed and you can safely ignore it.
@@ -269,231 +168,309 @@ The ContentSignal Team
 </body>
 </html>
 """
-    return {
-        "subject": subject,
-        "text": text_content,
-        "html": html_content,
-    }
+    return {"subject": subject, "text": text_content, "html": html_content}
 
 
-def _send_via_resend(to_email: str, subject: str, html: str, text: str) -> Dict[str, Any]:
-    """Send verification email using Resend HTTP API."""
-    effective_from = get_effective_email_from("resend")
-    sender = f"{EMAIL_FROM_NAME} <{effective_from}>" if EMAIL_FROM_NAME else effective_from
-    url = "https://api.resend.com/emails"
-    headers = {
-        "Authorization": f"Bearer {RESEND_API_KEY.strip()}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "from": sender,
-        "to": [to_email],
-        "subject": subject,
-        "html": html,
-        "text": text,
-    }
+# =========================================================================
+# Email Provider Abstraction (Phase 8)
+# =========================================================================
 
-    sender_domain = effective_from.split("@")[-1] if "@" in effective_from else "unknown"
-    logger.info("[RESEND] Sending email to %s via @%s", mask_email_address(to_email), sender_domain)
+class BaseEmailProvider(ABC):
+    @abstractmethod
+    def send(self, to_email: str, subject: str, html: str, text: str) -> Dict[str, Any]:
+        """Dispatch email and return structured delivery status."""
+        pass
 
-    try:
-        with httpx.Client(timeout=10.0) as client:
-            response = client.post(url, headers=headers, json=payload)
-            if response.status_code in (200, 201):
-                data = response.json()
-                delivery_id = data.get("id", "resend_ok")
-                logger.info(
-                    "[RESEND] Delivery SUCCESS to %s (id: %s)",
-                    mask_email_address(to_email),
-                    delivery_id,
-                )
-                return {
-                    "success": True,
-                    "provider": "resend",
-                    "delivery_id": delivery_id,
-                    "message": "Verification email dispatched via Resend.",
-                }
-            else:
-                err_detail = response.text[:200]
-                logger.error(
-                    "[RESEND] API rejected dispatch to %s (HTTP %s): %s",
-                    mask_email_address(to_email),
-                    response.status_code,
-                    err_detail,
-                )
-                return {
-                    "success": False,
-                    "provider": "resend",
-                    "code": f"RESEND_{response.status_code}",
-                    "delivery_id": None,
-                    "message": f"Resend API error: HTTP {response.status_code}",
-                }
-    except Exception as e:
-        logger.error(
-            "[RESEND] Network exception during email dispatch to %s: %s",
-            mask_email_address(to_email),
-            type(e).__name__,
-        )
-        return {
-            "success": False,
-            "provider": "resend",
-            "code": "RESEND_NETWORK_ERROR",
-            "delivery_id": None,
-            "message": "Network exception during email dispatch.",
+
+class ResendProvider(BaseEmailProvider):
+    def send(self, to_email: str, subject: str, html: str, text: str) -> Dict[str, Any]:
+        resend_key = sys.modules[__name__].RESEND_API_KEY
+        if not resend_key:
+            return {
+                "success": False,
+                "provider": "resend",
+                "code": "RESEND_NOT_CONFIGURED",
+                "delivery_id": None,
+                "message": "RESEND_API_KEY is not configured.",
+            }
+
+        effective_from = get_effective_email_from("resend")
+        from_name = sys.modules[__name__].EMAIL_FROM_NAME
+        sender = f"{from_name} <{effective_from}>" if from_name else effective_from
+        url = "https://api.resend.com/emails"
+        headers = {
+            "Authorization": f"Bearer {resend_key.strip()}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "from": sender,
+            "to": [to_email],
+            "subject": subject,
+            "html": html,
+            "text": text,
         }
 
+        logger.info("[RESEND] Sending email to %s via %s", mask_email_address(to_email), effective_from)
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                response = client.post(url, headers=headers, json=payload)
+                if response.status_code in (200, 201):
+                    data = response.json()
+                    delivery_id = data.get("id", "resend_ok")
+                    logger.info("[RESEND] Delivery SUCCESS to %s (id: %s)", mask_email_address(to_email), delivery_id)
+                    return {
+                        "success": True,
+                        "provider": "resend",
+                        "delivery_id": delivery_id,
+                        "message": "Verification email dispatched via Resend.",
+                    }
+                else:
+                    err_detail = response.text[:200]
+                    if response.status_code == 403 and ("testing email" in err_detail.lower() or "verify" in err_detail.lower() or "domain" in err_detail.lower()):
+                        logger.error(
+                            "[RESEND] 403 Domain Restriction: Test sender 'onboarding@resend.dev' can only deliver to the account owner's email address. To send to any recipient, verify your custom domain at https://resend.com/domains, or use Gmail SMTP."
+                        )
+                    else:
+                        logger.error("[RESEND] API rejected dispatch to %s (HTTP %s): %s", mask_email_address(to_email), response.status_code, err_detail)
+                    return {
+                        "success": False,
+                        "provider": "resend",
+                        "code": f"RESEND_{response.status_code}",
+                        "delivery_id": None,
+                        "message": f"Resend API error: HTTP {response.status_code} - {err_detail}",
+                    }
+        except Exception as e:
+            logger.error("[RESEND] Network exception during email dispatch to %s: %s", mask_email_address(to_email), type(e).__name__)
+            return {
+                "success": False,
+                "provider": "resend",
+                "code": "RESEND_NETWORK_ERROR",
+                "delivery_id": None,
+                "message": f"Network error connecting to Resend: {str(e)}",
+            }
 
-def _send_via_smtp(to_email: str, subject: str, html: str, text: str) -> Dict[str, Any]:
-    """Send verification email using authenticated SMTP (e.g. Gmail)."""
-    if not SMTP_HOST:
-        logger.error("[EMAIL] send: FAILED")
-        logger.error("[EMAIL] error code: SMTP_NOT_CONFIGURED")
-        logger.error("[EMAIL] error message: SMTP_HOST is not set in environment.")
-        return {
-            "success": False,
-            "code": "SMTP_NOT_CONFIGURED",
-            "provider": "smtp",
-            "delivery_id": None,
-            "message": "Email delivery service is not configured. Missing SMTP_HOST in environment.",
-            "missing_variables": ["SMTP_HOST", "SMTP_USER", "SMTP_PASS"],
-        }
 
-    # When using authenticated SMTP (like Gmail), envelope sender must match the authenticated user
-    effective_from = (
-        SMTP_USER.strip()
-        if (SMTP_USER and "@" in SMTP_USER)
-        else (EMAIL_FROM.strip() if EMAIL_FROM else "noreply@contentsignal.ai")
-    )
-    sender = f"{EMAIL_FROM_NAME} <{effective_from}>" if EMAIL_FROM_NAME else effective_from
-    
-    # Generate RFC 2822 Message-ID
-    domain = SMTP_HOST.split(".")[-2] + "." + SMTP_HOST.split(".")[-1] if "." in SMTP_HOST else "contentsignal.ai"
-    provider_msg_id = make_msgid(domain=domain)
+class SMTPProvider(BaseEmailProvider):
+    def send(self, to_email: str, subject: str, html: str, text: str) -> Dict[str, Any]:
+        smtp_host = sys.modules[__name__].SMTP_HOST
+        smtp_port = sys.modules[__name__].SMTP_PORT
+        smtp_user = sys.modules[__name__].SMTP_USER
+        smtp_pass = sys.modules[__name__].SMTP_PASSWORD
+        smtp_use_ssl = sys.modules[__name__].SMTP_USE_SSL
+        smtp_use_tls = sys.modules[__name__].SMTP_USE_TLS
+        from_name = sys.modules[__name__].EMAIL_FROM_NAME
 
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = sender
-    msg["To"] = to_email
-    msg["Date"] = formatdate(localtime=True)
-    msg["Message-ID"] = provider_msg_id
-    
-    part_text = MIMEText(text, "plain", "utf-8")
-    part_html = MIMEText(html, "html", "utf-8")
-    msg.attach(part_text)
-    msg.attach(part_html)
-
-    server = None
-    stage = "initialization"
-    try:
-        stage = f"connecting to {SMTP_HOST}:{SMTP_PORT}"
-        use_ssl = (int(SMTP_PORT) == 465) or (SMTP_USE_SSL and int(SMTP_PORT) != 587)
-        if use_ssl:
-            server = smtplib.SMTP_SSL(SMTP_HOST.strip(), int(SMTP_PORT), timeout=10)
-        else:
-            server = smtplib.SMTP(SMTP_HOST.strip(), int(SMTP_PORT), timeout=10)
-            if SMTP_USE_TLS:
-                stage = "STARTTLS negotiation"
-                server.starttls()
-
-        if SMTP_USER and SMTP_PASSWORD:
-            stage = "SMTP authentication"
-            clean_pw = SMTP_PASSWORD.strip()
-            if "gmail.com" in (SMTP_HOST or "").lower():
-                clean_pw = clean_pw.replace(" ", "")
-            server.login(SMTP_USER.strip(), clean_pw)
-        else:
-            missing = []
-            if not SMTP_USER:
-                missing.append("SMTP_USER")
-            if not SMTP_PASSWORD:
-                missing.append("SMTP_PASS")
-            logger.error("[EMAIL] send: FAILED")
-            logger.error("[EMAIL] error code: MISSING_CREDENTIALS")
-            logger.error("[EMAIL] error message: Missing required SMTP credentials: %s", ", ".join(missing))
-            if server:
-                server.quit()
+        if not smtp_host:
             return {
                 "success": False,
                 "provider": "smtp",
-                "code": "MISSING_CREDENTIALS",
+                "code": "SMTP_NOT_CONFIGURED",
                 "delivery_id": None,
-                "stage": "authentication",
-                "message": f"Email delivery failed: Missing required credentials ({', '.join(missing)}).",
-                "missing_variables": missing,
+                "stage": "preflight",
+                "message": "SMTP_HOST is not configured in environment.",
             }
 
-        stage = "sendmail delivery"
-        server.sendmail(effective_from, [to_email], msg.as_string())
-        
-        stage = "server quit"
-        server.quit()
+        smtp_sender = getattr(sys.modules[__name__], "EMAIL_FROM", "") or smtp_user
+        effective_from = get_effective_email_from("smtp", custom_sender=smtp_sender)
+        sender_header = f"{from_name} <{effective_from}>" if from_name else effective_from
+        provider_msg_id = make_msgid(domain=effective_from.split("@")[-1] if "@" in effective_from else "contentsignal.ai")
+
+        msg = MIMEMultipart("alternative")
+        msg["From"] = sender_header
+        msg["To"] = to_email
+        msg["Subject"] = subject
+        msg["Date"] = formatdate(localtime=True)
+        msg["Message-ID"] = provider_msg_id
+        msg.attach(MIMEText(text, "plain", "utf-8"))
+        msg.attach(MIMEText(html, "html", "utf-8"))
+
         server = None
+        stage = "socket connect"
+        try:
+            use_ssl = (int(smtp_port) == 465) or (smtp_use_ssl and int(smtp_port) != 587)
+            if use_ssl:
+                server = smtplib.SMTP_SSL(smtp_host.strip(), int(smtp_port), timeout=10)
+            else:
+                server = smtplib.SMTP(smtp_host.strip(), int(smtp_port), timeout=10)
+                if smtp_use_tls:
+                    stage = "starttls handshake"
+                    server.starttls()
 
-        logger.info("[EMAIL] transporter: SUCCESS")
-        logger.info("[EMAIL] send: SUCCESS")
-        logger.info("[EMAIL] provider message ID: %s", provider_msg_id)
+            if smtp_user and smtp_pass:
+                stage = "authentication"
+                clean_pw = smtp_pass.replace(" ", "") if "gmail.com" in smtp_host.lower() else smtp_pass
+                server.login(smtp_user.strip(), clean_pw)
+            elif not smtp_user or not smtp_pass:
+                missing = []
+                if not smtp_user: missing.append("SMTP_USER")
+                if not smtp_pass: missing.append("SMTP_PASS")
+                return {
+                    "success": False,
+                    "provider": "smtp",
+                    "code": "MISSING_CREDENTIALS",
+                    "delivery_id": None,
+                    "stage": "authentication",
+                    "message": f"Email delivery failed: Missing required credentials ({', '.join(missing)}).",
+                }
 
-        return {
-            "success": True,
-            "provider": "smtp",
-            "delivery_id": provider_msg_id,
-            "message": "Verification email accepted by SMTP server.",
-        }
-    except smtplib.SMTPAuthenticationError as e:
-        err_text = e.smtp_error.decode(errors="ignore") if isinstance(e.smtp_error, bytes) else str(e)
-        logger.error("[EMAIL] send: FAILED")
-        logger.error("[EMAIL] error code: EAUTH (535)")
-        logger.error("[EMAIL] error message: SMTP Authentication failed for %s. Check Google App Password.", mask_email_address(to_email))
+            stage = "sendmail delivery"
+            server.sendmail(effective_from, [to_email], msg.as_string())
+            stage = "server quit"
+            server.quit()
+            server = None
+
+            logger.info("[EMAIL] transporter: SUCCESS")
+            logger.info("[EMAIL] send: SUCCESS")
+            logger.info("[EMAIL] provider message ID: %s", provider_msg_id)
+            return {
+                "success": True,
+                "provider": "smtp",
+                "delivery_id": provider_msg_id,
+                "message": "Verification email accepted by SMTP server.",
+            }
+        except smtplib.SMTPAuthenticationError as e:
+            err_text = e.smtp_error.decode(errors="ignore") if isinstance(e.smtp_error, bytes) else str(e)
+            logger.error("[EMAIL] send: FAILED. SMTP Authentication failed for %s", mask_email_address(to_email))
+            return {
+                "success": False,
+                "provider": "smtp",
+                "code": "EAUTH",
+                "delivery_id": None,
+                "stage": "authentication",
+                "message": f"SMTP Authentication failed (check Google App Password): {err_text}",
+            }
+        except (smtplib.SMTPConnectError, TimeoutError, ConnectionRefusedError, OSError) as e:
+            logger.error("[EMAIL] send: FAILED. Connection failed to %s:%s - %s", smtp_host, smtp_port, type(e).__name__)
+            return {
+                "success": False,
+                "provider": "smtp",
+                "code": "ECONNECTION",
+                "delivery_id": None,
+                "stage": "connection",
+                "message": f"SMTP Connection failed to {smtp_host}:{smtp_port}: {str(e)}",
+            }
+        except Exception as e:
+            logger.error("[EMAIL] send: FAILED at stage '%s': %s", stage, str(e))
+            return {
+                "success": False,
+                "provider": "smtp",
+                "code": type(e).__name__,
+                "delivery_id": None,
+                "stage": stage,
+                "message": f"SMTP delivery error ({stage}): {str(e)}",
+            }
+        finally:
+            if server:
+                try:
+                    server.close()
+                except Exception:
+                    pass
+
+
+class NullEmailProvider(BaseEmailProvider):
+    def send(self, to_email: str, subject: str, html: str, text: str) -> Dict[str, Any]:
+        dev_mode = sys.modules[__name__].DEV_OTP_MODE
+        app_env = sys.modules[__name__].APP_ENV
+        if dev_mode or app_env == "development":
+            return {
+                "success": True,
+                "provider": "development_fallback",
+                "delivery_id": "dev_simulated",
+                "message": "Development fallback simulated email delivery.",
+            }
         return {
             "success": False,
-            "provider": "smtp",
-            "code": "EAUTH",
+            "provider": "unconfigured",
+            "code": "EMAIL_NOT_CONFIGURED",
             "delivery_id": None,
-            "stage": "authentication",
-            "message": f"SMTP Authentication failed (check username and Google App Password): {err_text}",
+            "message": "No email provider is configured. Please configure SMTP or Resend credentials.",
         }
-    except smtplib.SMTPRecipientsRefused as e:
-        logger.error("[EMAIL] send: FAILED")
-        logger.error("[EMAIL] error code: ERECIPIENT")
-        logger.error("[EMAIL] error message: Recipient address %s rejected by server.", mask_email_address(to_email))
-        return {
-            "success": False,
-            "provider": "smtp",
-            "code": "ERECIPIENT",
-            "delivery_id": None,
-            "stage": "recipients",
-            "message": f"Recipient address rejected by SMTP provider: {mask_email_address(to_email)}",
-        }
-    except (smtplib.SMTPConnectError, TimeoutError, ConnectionRefusedError, OSError) as e:
-        logger.error("[EMAIL] send: FAILED")
-        logger.error("[EMAIL] error code: ECONNECTION")
-        logger.error("[EMAIL] error message: Connection failed to %s:%s - %s", SMTP_HOST, SMTP_PORT, type(e).__name__)
-        return {
-            "success": False,
-            "provider": "smtp",
-            "code": "ECONNECTION",
-            "delivery_id": None,
-            "stage": "connection",
-            "message": f"SMTP Connection failed to {SMTP_HOST}:{SMTP_PORT}: {str(e)}",
-        }
-    except Exception as e:
-        logger.error("[EMAIL] send: FAILED")
-        logger.error("[EMAIL] error code: %s", type(e).__name__)
-        logger.error("[EMAIL] error message: SMTP delivery failed at stage '%s': %s", stage, str(e))
-        return {
-            "success": False,
-            "provider": "smtp",
-            "code": type(e).__name__,
-            "delivery_id": None,
-            "stage": stage,
-            "message": f"SMTP delivery error ({stage}): {str(e)}",
-        }
-    finally:
-        if server:
-            try:
-                server.close()
-            except Exception:
-                pass
+
+
+# =========================================================================
+# Factory and Entrypoints
+# =========================================================================
+
+def get_email_provider() -> str:
+    """
+    Determine the active email provider based on strict priority:
+    1. Explicit EMAIL_PROVIDER=smtp -> ALWAYS use smtp.
+    2. Explicit EMAIL_PROVIDER=resend -> ALWAYS use resend.
+    3. If EMAIL_PROVIDER is missing or empty -> Auto-detect:
+       - Resend if RESEND_API_KEY present
+       - SMTP if SMTP_HOST present
+       - Development fallback if dev mode or local environment
+       - Unconfigured otherwise
+    """
+    provider_pref = getattr(sys.modules[__name__], "EMAIL_PROVIDER", "").strip().lower()
+    resend_key = getattr(sys.modules[__name__], "RESEND_API_KEY", "").strip()
+    smtp_host = getattr(sys.modules[__name__], "SMTP_HOST", "").strip()
+    dev_mode = getattr(sys.modules[__name__], "DEV_OTP_MODE", False)
+    app_env = getattr(sys.modules[__name__], "APP_ENV", "development").lower()
+
+    # Priority 1 & 2: Explicit provider choice ALWAYS wins. No silent fallback!
+    if provider_pref == "smtp":
+        return "smtp"
+    if provider_pref == "resend":
+        return "resend"
+
+    # Priority 3: Auto-detection only when EMAIL_PROVIDER is not explicitly specified
+    if resend_key:
+        return "resend"
+    if smtp_host:
+        return "smtp"
+    if dev_mode or app_env == "development":
+        return "development_fallback"
+    return "unconfigured"
+
+
+def get_email_provider_instance() -> BaseEmailProvider:
+    """Return an instantiated EmailProvider based on current configuration."""
+    provider = get_email_provider()
+    if provider == "resend":
+        return ResendProvider()
+    if provider == "smtp":
+        return SMTPProvider()
+    return NullEmailProvider()
+
+
+def get_email_provider_status() -> Dict[str, Any]:
+    """Return non-sensitive status information about email and SMS configuration."""
+    provider = get_email_provider()
+    
+    if provider == "smtp":
+        smtp_sender = getattr(sys.modules[__name__], "EMAIL_FROM", "") or getattr(sys.modules[__name__], "SMTP_USER", "")
+        effective_from = get_effective_email_from("smtp", custom_sender=smtp_sender)
+    else:
+        resend_sender = getattr(sys.modules[__name__], "EMAIL_FROM", "")
+        effective_from = get_effective_email_from("resend", custom_sender=resend_sender)
+
+    from_name = getattr(sys.modules[__name__], "EMAIL_FROM_NAME", "ContentSignal")
+    sender = f"{from_name} <{effective_from}>" if from_name else effective_from
+
+    smtp_host = getattr(sys.modules[__name__], "SMTP_HOST", "").strip()
+    smtp_user = getattr(sys.modules[__name__], "SMTP_USER", "").strip()
+    smtp_pass = getattr(sys.modules[__name__], "SMTP_PASSWORD", "").strip()
+    resend_key = getattr(sys.modules[__name__], "RESEND_API_KEY", "").strip()
+
+    if provider == "smtp":
+        is_configured = bool(smtp_host and smtp_user and smtp_pass)
+    elif provider == "resend":
+        is_configured = bool(resend_key)
+    elif provider == "development_fallback":
+        is_configured = True
+    else:
+        is_configured = False
+
+    return {
+        "provider": provider,
+        "is_configured": is_configured,
+        "sender": sender,
+        "environment": getattr(sys.modules[__name__], "APP_ENV", "development"),
+        "smtp_host_configured": bool(smtp_host),
+        "resend_configured": bool(resend_key),
+        "sms": get_sms_provider_status(),
+    }
 
 
 def send_verification_email(
@@ -503,54 +480,85 @@ def send_verification_email(
 ) -> Dict[str, Any]:
     """
     Primary verification email entrypoint.
-    Dispatches to Resend, SMTP, or secure development fallback based on configuration.
+    Dispatches to the explicitly configured EmailProvider without cross-provider fallback.
     """
-    provider = get_email_provider()
     content = _build_email_content(to_email, verification_code, full_name)
+    provider_inst = get_email_provider_instance()
+    return provider_inst.send(to_email, content["subject"], content["html"], content["text"])
 
-    if provider == "resend":
-        return _send_via_resend(to_email, content["subject"], content["html"], content["text"])
 
-    if provider == "smtp":
-        return _send_via_smtp(to_email, content["subject"], content["html"], content["text"])
+def verify_smtp_connection() -> Dict[str, Any]:
+    """Verify SMTP connection and authentication safely without leaking credentials."""
+    smtp_host = getattr(sys.modules[__name__], "SMTP_HOST", "")
+    smtp_port = getattr(sys.modules[__name__], "SMTP_PORT", 587)
+    smtp_user = getattr(sys.modules[__name__], "SMTP_USER", "")
+    smtp_pass = getattr(sys.modules[__name__], "SMTP_PASSWORD", "")
+    smtp_use_ssl = getattr(sys.modules[__name__], "SMTP_USE_SSL", False)
+    smtp_use_tls = getattr(sys.modules[__name__], "SMTP_USE_TLS", True)
 
-    # Development Fallback: returns simulated delivery in development
-    if provider == "development_fallback":
-        logger.warning(
-            "[DEV EMAIL FALLBACK] Email verification simulated for %s (code: %s).",
-            mask_email_address(to_email),
-            verification_code,
-        )
+    if not smtp_host:
         return {
-            "success": True,
-            "provider": "development_fallback",
-            "delivery_id": "dev_simulated",
-            "message": "Development fallback simulated email delivery.",
+            "success": False,
+            "code": "SMTP_NOT_CONFIGURED",
+            "message": "SMTP_HOST is not configured in .env",
+            "missing_variables": ["SMTP_HOST", "SMTP_USER", "SMTP_PASS"],
         }
 
-    # When no provider is configured, delivery FAILS
-    missing_vars = []
-    if not SMTP_HOST:
-        missing_vars.append("SMTP_HOST")
-    if not SMTP_USER:
-        missing_vars.append("SMTP_USER")
-    if not SMTP_PASSWORD:
-        missing_vars.append("SMTP_PASS")
+    missing = []
+    if not smtp_user: missing.append("SMTP_USER")
+    if not smtp_pass: missing.append("SMTP_PASSWORD")
+    if missing:
+        return {
+            "success": False,
+            "code": "MISSING_CREDENTIALS",
+            "message": f"Missing required SMTP credentials: {', '.join(missing)}",
+            "missing_variables": missing,
+        }
 
-    err_msg = (
-        f"Email delivery service is not configured. Missing required environment variables: {', '.join(missing_vars)}. "
-        "Please configure Gmail SMTP or Resend in .env."
-    )
-    logger.error("[EMAIL] send: FAILED")
-    logger.error("[EMAIL] error code: SMTP_NOT_CONFIGURED")
-    logger.error("[EMAIL] error message: %s", err_msg)
+    server = None
+    try:
+        use_ssl = (int(smtp_port) == 465) or (smtp_use_ssl and int(smtp_port) != 587)
+        if use_ssl:
+            server = smtplib.SMTP_SSL(smtp_host.strip(), int(smtp_port), timeout=10)
+        else:
+            server = smtplib.SMTP(smtp_host.strip(), int(smtp_port), timeout=10)
+            if smtp_use_tls:
+                server.starttls()
 
+        clean_pw = smtp_pass.replace(" ", "") if "gmail.com" in smtp_host.lower() else smtp_pass
+        server.login(smtp_user, clean_pw)
+        server.quit()
+        server = None
+        return {
+            "success": True,
+            "code": "OK",
+            "message": f"Successfully connected and authenticated with {smtp_host}:{smtp_port}.",
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "code": type(e).__name__,
+            "message": f"SMTP handshake failed: {str(e)}",
+        }
+    finally:
+        if server:
+            try:
+                server.close()
+            except Exception:
+                pass
+
+
+def test_send_email(to_email: str) -> Dict[str, Any]:
+    """
+    Phase 24: Diagnostic endpoint helper to test sending a real verification email.
+    Never returns credentials or secrets.
+    """
+    test_otp = "123456"
+    res = send_verification_email(to_email, test_otp, "Diagnostics Tester")
     return {
-        "success": False,
-        "code": "SMTP_NOT_CONFIGURED",
-        "provider": "unconfigured",
-        "delivery_id": None,
-        "message": err_msg,
-        "missing_variables": missing_vars,
+        "success": res.get("success", False),
+        "provider": res.get("provider", "unknown"),
+        "delivery_id": res.get("delivery_id"),
+        "code": res.get("code", "OK" if res.get("success") else "DELIVERY_FAILED"),
+        "message": res.get("message", "Test dispatch completed."),
     }
-

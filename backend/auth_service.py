@@ -357,13 +357,15 @@ class AuthService:
                 err_code = email_delivery.get("code") or "EMAIL_DELIVERY_FAILED"
                 err_msg = email_delivery.get("message") or "Unable to send verification code."
                 resend_err = email_delivery.get("resend_error") or ""
+                clean_reason = re.sub(r"[\r\n\t]+", " ", str(resend_err or err_msg)).strip()[:200]
+                clean_reason = clean_reason.encode("ascii", "replace").decode("ascii")
                 logger.error("[AUTH] Email dispatch failed during signup for %s: [%s] %s", mask_email_address(clean_email), err_code, err_msg)
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Unable to send verification code. Please try again.",
                     headers={
                         "X-Error-Code": str(err_code),
-                        "X-Error-Reason": str(resend_err or err_msg)[:200],
+                        "X-Error-Reason": clean_reason,
                     },
                 )
 
@@ -520,13 +522,15 @@ class AuthService:
             err_code = delivery.get("code") or "EMAIL_DELIVERY_FAILED"
             err_msg = delivery.get("message") or "Unable to send verification code."
             resend_err = delivery.get("resend_error") or ""
+            clean_reason = re.sub(r"[\r\n\t]+", " ", str(resend_err or err_msg)).strip()[:200]
+            clean_reason = clean_reason.encode("ascii", "replace").decode("ascii")
             logger.error("[AUTH] Resend email delivery failed for %s: [%s] %s", mask_email_address(clean_email), err_code, err_msg)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Unable to send verification code. Please try again.",
                 headers={
                     "X-Error-Code": str(err_code),
-                    "X-Error-Reason": str(resend_err or err_msg)[:200],
+                    "X-Error-Reason": clean_reason,
                 },
             )
 
@@ -762,13 +766,15 @@ class AuthService:
                 err_code = delivery.get("code") or "EMAIL_DELIVERY_FAILED"
                 err_msg = delivery.get("message") or "Unable to send password reset code."
                 resend_err = delivery.get("resend_error") or ""
+                clean_reason = re.sub(r"[\r\n\t]+", " ", str(resend_err or err_msg)).strip()[:200]
+                clean_reason = clean_reason.encode("ascii", "replace").decode("ascii")
                 logger.error("[AUTH] Forgot password email delivery failed for %s: [%s] %s", mask_email_address(user.email), err_code, err_msg)
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Unable to send password reset code. Please try again later.",
                     headers={
                         "X-Error-Code": str(err_code),
-                        "X-Error-Reason": str(resend_err or err_msg)[:200],
+                        "X-Error-Reason": clean_reason,
                     },
                 )
         elif user.mobile_number:

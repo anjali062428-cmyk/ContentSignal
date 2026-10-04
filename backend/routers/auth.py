@@ -11,6 +11,7 @@ Preserves all legacy endpoints for backward compatibility while providing full s
 - Changing contact info on pending verification.
 - Diagnostic email endpoints (/email-status, /verify-smtp, /test-email).
 """
+import re
 import time
 import secrets
 from datetime import datetime, timedelta
@@ -493,13 +494,15 @@ def send_otp(req: SendOTPRequest, db: Session = Depends(get_db)):
         err_code = email_delivery.get("code") or "EMAIL_DELIVERY_FAILED"
         err_msg = email_delivery.get("message") or "Unable to send verification code. Please try again."
         resend_err = email_delivery.get("resend_error") or ""
+        clean_reason = re.sub(r"[\r\n\t]+", " ", str(resend_err or err_msg)).strip()[:200]
+        clean_reason = clean_reason.encode("ascii", "replace").decode("ascii")
         logger.error("[AUTH] /send-otp delivery failed for %s: [%s] %s", mask_email(user.email), err_code, err_msg)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to send verification code. Please try again.",
             headers={
                 "X-Error-Code": str(err_code),
-                "X-Error-Reason": str(resend_err or err_msg)[:200],
+                "X-Error-Reason": clean_reason,
             },
         )
 

@@ -759,5 +759,92 @@ def test_decoupled_phone_signup_and_verify_success(db_session):
         assert "access_token" in login_res2.json()
 
 
+def test_resend_error_crlf_sanitized_and_cors_preserved(db_session):
+    """
+    Regression test:
+    Verify that when Resend returns a multiline error with \\r and \\n:
+    1. X-Error-Reason is sanitized to a single line without \\r or \\n.
+    2. No uvicorn/h11 Illegal header value occurs (validated via h11.Response).
+    3. The endpoint returns a normal HTTP 500 response (instead of crashing / 502).
+    4. CORS headers (access-control-allow-origin) are preserved.
+    5. The public response body is generic and does not leak raw errors or secrets.
+    """
+    import h11
+
+    crlf_raw_resend_error = (
+        "You can only send testing emails to your own email address.\r\n"
+        "To send to other recipients, please verify a domain.\n"
+        "More details at: https://resend.com/domains\r\n"
+    )
+
+    mock_delivery = {
+        "success": False,
+        "code": "RESEND_403",
+        "message": "Unable to send verification code.",
+        "resend_error": crlf_raw_resend_error,
+    }
+
+    # 1. Test /api/auth/signup-initiate
+    with patch("backend.routers.auth.send_verification_email", return_value=mock_delivery), \
+         patch("backend.auth_service.send_verification_email", return_value=mock_delivery):
+        res = client.post(
+            "/api/auth/signup-initiate",
+            json={
+                "full_name": "Sanitize Test",
+                "email": f"crlf_test_{uuid.uuid4().hex[:8]}@example.com",
+                "password": "ValidPassword123!",
+                "confirm_password": "ValidPassword123!",
+                "terms_accepted": True,
+            },
+            headers={"Origin": "https://content-signal-lac.vercel.app"},
+        )
+        # Normal HTTP 500 status (no connection drop / 502)
+        assert res.status_code == 500
+        # CORS headers are preserved
+        assert res.headers.get("access-control-allow-origin") == "https://content-signal-lac.vercel.app"
+        # X-Error-Reason contains NO CR or LF
+        header_reason = res.headers.get("x-error-reason", "")
+        assert "\r" not in header_reason
+        assert "\n" not in header_reason
+        assert "You can only send testing emails" in header_reason
+        # X-Error-Code is present
+        assert res.headers.get("x-error-code") == "RESEND_403"
+        # Body is generic and safe
+        assert res.json()["detail"] == "Unable to send verification code. Please try again."
+
+        # Verify h11 accepts the response headers without raising LocalProtocolError
+        raw_headers = [(k.encode("ascii"), v.encode("ascii")) for k, v in res.headers.items()]
+        h11_resp = h11.Response(status_code=500, headers=raw_headers)
+        assert h11_resp.status_code == 500
+
+    # 2. Test /api/auth/send-otp
+    with patch("backend.routers.auth.send_verification_email", return_value=mock_delivery):
+        res_otp = client.post(
+            "/api/auth/send-otp",
+            json={"email": f"crlf_otp_{uuid.uuid4().hex[:8]}@example.com"},
+            headers={"Origin": "https://content-signal-lac.vercel.app"},
+        )
+        assert res_otp.status_code == 500
+        assert res_otp.headers.get("access-control-allow-origin") == "https://content-signal-lac.vercel.app"
+        header_reason_otp = res_otp.headers.get("x-error-reason", "")
+        assert "\r" not in header_reason_otp
+        assert "\n" not in header_reason_otp
+        assert "You can only send testing emails" in header_reason_otp
+        assert res_otp.headers.get("x-error-code") == "RESEND_403"
+
+        # Verify h11 accepts send-otp headers
+        raw_headers_otp = [(k.encode("ascii"), v.encode("ascii")) for k, v in res_otp.headers.items()]
+        h11_resp_otp = h11.Response(status_code=500, headers=raw_headers_otp)
+        assert h11_resp_otp.status_code == 500
+
+    # 3. Test raw CRLF would indeed fail h11 without sanitization
+    with pytest.raises(h11.LocalProtocolError):
+        h11.Response(
+            status_code=500,
+            headers=[(b"x-error-reason", crlf_raw_resend_error.encode("latin1"))],
+        )
+
+
+
 
 

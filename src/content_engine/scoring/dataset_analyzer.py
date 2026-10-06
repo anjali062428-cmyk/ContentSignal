@@ -18,8 +18,41 @@ from content_engine.config import BASE_DIR, REPORTS_DIR, RANDOM_SEED
 from content_engine.validation.dataset_validator import is_flyrank_schema_candidate
 from content_engine.adapters.flyrank import FlyRankAdapter
 from content_engine.adapters.generic_tabular import GenericTabularAdapter
+from content_engine.adapters.time_series import TimeSeriesAdapter
 from content_engine.archetypes.clustering import ARCHETYPE_NAMES, ARCHETYPE_ACTIONS
 from content_engine.classification.page_classifier import extract_and_normalize_domain, classify_page_type
+
+
+def _safe_float(val: Any, default: float = 0.0) -> float:
+    if val is None or pd.isna(val) or val == "":
+        return default
+    try:
+        if isinstance(val, str):
+            val = val.strip().rstrip("%")
+        f = float(val)
+        return default if np.isnan(f) or np.isinf(f) else f
+    except (ValueError, TypeError):
+        return default
+
+
+def _parse_days(val: Any, default: float = 0.0) -> float:
+    if val is None or pd.isna(val) or val == "":
+        return default
+    if isinstance(val, (int, float, np.integer, np.floating)):
+        f = float(val)
+        return default if np.isnan(f) or np.isinf(f) else f
+    val_str = str(val).strip()
+    try:
+        f = float(val_str)
+        return default if np.isnan(f) or np.isinf(f) else f
+    except (ValueError, TypeError):
+        pass
+    try:
+        dt = pd.to_datetime(val_str)
+        delta = (pd.Timestamp.now() - dt).days
+        return float(max(0, delta))
+    except Exception:
+        return default
 
 
 def analyze_and_persist_dataset(
@@ -40,9 +73,13 @@ def analyze_and_persist_dataset(
     # 1. Select appropriate adapter
     cols = [str(c).strip() for c in df_clean.columns]
     is_flyrank = is_flyrank_schema_candidate(cols)
+    date_like_cols = sum(1 for col in cols[1:] if len(col) == 10 and col.count("-") == 2)
+    is_wide_ts = date_like_cols > 20
 
     if is_flyrank or dataset_id == "starter-flyrank":
         adapter = FlyRankAdapter(dataset_id=dataset_id)
+    elif is_wide_ts:
+        adapter = TimeSeriesAdapter(dataset_id=dataset_id)
     else:
         adapter = GenericTabularAdapter(dataset_id=dataset_id)
 
@@ -67,10 +104,11 @@ def analyze_and_persist_dataset(
 
     # 5. Persist to Database in batches
     batch_size = 2000
+    has_canonical = df_canonical is not None and not df_canonical.empty
     for start_idx in range(0, total_rows, batch_size):
         end_idx = min(start_idx + batch_size, total_rows)
         batch = df_scored.iloc[start_idx:end_idx]
-        can_batch = df_canonical.iloc[start_idx:end_idx]
+        can_batch = df_canonical.iloc[start_idx:end_idx] if has_canonical else None
 
         page_objs = []
         metric_objs = []
@@ -78,13 +116,15 @@ def analyze_and_persist_dataset(
         rec_objs = []
 
         for offset, (_, row) in enumerate(batch.iterrows()):
-            can_row = can_batch.iloc[offset]
+            can_row = can_batch.iloc[offset].to_dict() if (can_batch is not None and offset < len(can_batch)) else {}
 
             # Determine primary identifier
             raw_cid = str(
                 row.get("content_id") or
                 row.get("id") or
                 row.get("page_id") or
+                row.get("Page") or
+                row.get("page") or
                 row.get("seller_id") or
                 can_row.get("canonical_record_id") or
                 f"rec_{start_idx + offset + 1}"
@@ -92,7 +132,7 @@ def analyze_and_persist_dataset(
             p_id = raw_cid if dataset_id == "starter-flyrank" else f"{dataset_id}_{raw_cid}"
 
             dom = str(row.get("domain")).strip() if "domain" in row and not pd.isna(row.get("domain")) and str(row.get("domain")).strip() else None
-            u = str(row.get("url")).strip() if "url" in row and not pd.isna(row.get("url")) and str(row.get("url")).strip() else None
+            u = str(row.get("url") or row.get("Page") or row.get("page") or "").strip() or None
             if not dom and u:
                 dom = extract_and_normalize_domain(u)
             if dom and dom.startswith("www."):
@@ -101,6 +141,8 @@ def analyze_and_persist_dataset(
             title = (
                 row.get("page_title") or
                 row.get("title") or
+                row.get("headline") or
+                row.get("Page") or
                 can_row.get("canonical_title") or
                 raw_cid
             )
@@ -115,35 +157,37 @@ def analyze_and_persist_dataset(
                 )
 
             # Extract metrics (fallback to canonical if specific FlyRank column is absent)
-            vis = float(row.get("impressions_90d") or row.get("impressions") or row.get("views") or can_row.get("canonical_visibility") or 0.0)
-            clicks = float(row.get("clicks_90d") or row.get("clicks") or can_row.get("canonical_search_visibility") or 0.0)
-            sessions = float(row.get("sessions_90d") or row.get("sessions") or vis or 0.0)
-            pviews = float(row.get("pageviews_90d") or row.get("pageviews") or vis or 0.0)
-            eng_sessions = float(row.get("engaged_sessions_90d") or row.get("likes") or row.get("comments") or can_row.get("canonical_engagement") or 0.0)
-            ctr_val = float(row.get("ctr") or can_row.get("canonical_ctr") or 0.0)
+            vis = _safe_float(row.get("impressions_90d") or row.get("impressions") or row.get("views") or can_row.get("canonical_visibility"))
+            if vis == 0.0:
+                date_keys = [c for c in row.index if len(str(c)) == 10 and str(c).count("-") == 2]
+                if date_keys:
+                    vis = float(sum(_safe_float(row.get(d)) for d in date_keys[-30:]))
+            clicks = _safe_float(row.get("clicks_90d") or row.get("clicks") or can_row.get("canonical_search_visibility"))
+            sessions = _safe_float(row.get("sessions_90d") or row.get("sessions") or vis)
+            pviews = _safe_float(row.get("pageviews_90d") or row.get("pageviews") or vis)
+            eng_sessions = _safe_float(row.get("engaged_sessions_90d") or row.get("likes") or row.get("comments") or can_row.get("canonical_engagement"))
+            ctr_val = _safe_float(row.get("ctr") or can_row.get("canonical_ctr"))
             if ctr_val == 0.0 and vis > 0 and clicks > 0:
                 ctr_val = round((clicks / vis) * 100.0, 2)
-            pos_val = float(row.get("avg_position") or row.get("rank") or row.get("position") or can_row.get("canonical_position") or 0.0)
-            eng_rate = float(row.get("engagement_rate") or (eng_sessions / max(1.0, sessions) * 100.0) or 0.0)
-            scroll_rate = float(row.get("scroll_rate") or 0.0)
-            wc = float(row.get("word_count") or can_row.get("canonical_text_length") or 0.0)
-            days_up = float(
+            pos_val = _safe_float(row.get("avg_position") or row.get("rank") or row.get("position") or can_row.get("canonical_position"))
+            eng_rate = _safe_float(row.get("engagement_rate")) or (_safe_float(eng_sessions / max(1.0, sessions) * 100.0) if sessions > 0 else 0.0)
+            scroll_rate = _safe_float(row.get("scroll_rate"))
+            wc = _safe_float(row.get("word_count") or can_row.get("canonical_text_length"))
+            days_up = _parse_days(
                 row.get("days_since_last_update") or
                 row.get("days_since_update") or
                 row.get("content_age_days") or
                 row.get("age") or
                 can_row.get("canonical_freshness") or
-                can_row.get("canonical_date") or
-                0.0
+                can_row.get("canonical_date")
             )
-            age_days = float(
+            age_days = _parse_days(
                 row.get("content_age_days") or
                 row.get("age") or
                 row.get("days_since_last_update") or
                 row.get("days_since_update") or
                 can_row.get("canonical_freshness") or
-                can_row.get("canonical_date") or
-                0.0
+                can_row.get("canonical_date")
             )
 
             page_objs.append(Page(
@@ -155,7 +199,7 @@ def analyze_and_persist_dataset(
                 content_age_days=age_days,
                 days_since_last_update=days_up,
                 word_count=wc,
-                char_count=float(row.get("char_count", 0) or 0),
+                char_count=_safe_float(row.get("char_count")),
                 domain=str(dom) if dom else None,
                 url=str(u) if u else None,
                 page_title=str(title) if title else None,
@@ -164,13 +208,13 @@ def analyze_and_persist_dataset(
             ))
 
             # Extract 30-day comparative window metrics
-            c_last = float(row.get("clicks_last_30d") or 0.0)
-            c_prev = float(row.get("clicks_prev_30d") or 0.0)
-            i_last = float(row.get("impressions_last_30d") or 0.0)
-            i_prev = float(row.get("impressions_prev_30d") or 0.0)
-            s_last = float(row.get("sessions_last_30d") or 0.0)
-            s_prev = float(row.get("sessions_prev_30d") or 0.0)
-            t_pct = float(row.get("trend_pct") or 0.0)
+            c_last = _safe_float(row.get("clicks_last_30d"))
+            c_prev = _safe_float(row.get("clicks_prev_30d"))
+            i_last = _safe_float(row.get("impressions_last_30d"))
+            i_prev = _safe_float(row.get("impressions_prev_30d"))
+            s_last = _safe_float(row.get("sessions_last_30d"))
+            s_prev = _safe_float(row.get("sessions_prev_30d"))
+            t_pct = _safe_float(row.get("trend_pct"))
 
             # Fallback estimation if explicit 30d columns missing
             if c_last == 0 and c_prev == 0 and clicks > 0:
@@ -204,16 +248,16 @@ def analyze_and_persist_dataset(
                 sessions_90d=sessions,
                 pageviews_90d=pviews,
                 engaged_sessions_90d=eng_sessions,
-                ai_sessions_90d=float(row.get("ai_sessions_90d", 0) or 0),
-                scroll_events_90d=float(row.get("scroll_events_90d", 0) or 0),
+                ai_sessions_90d=_safe_float(row.get("ai_sessions_90d")),
+                scroll_events_90d=_safe_float(row.get("scroll_events_90d")),
                 ctr=ctr_val,
                 avg_position=pos_val,
                 engagement_rate=eng_rate,
                 scroll_rate=scroll_rate,
-                ai_traffic_pct=float(row.get("ai_traffic_pct", 0) or 0),
-                search_volume=float(row.get("search_volume", 0) or 0),
-                competition=float(row.get("competition", 0) or 0),
-                cpc=float(row.get("cpc", 0) or 0),
+                ai_traffic_pct=_safe_float(row.get("ai_traffic_pct")),
+                search_volume=_safe_float(row.get("search_volume")),
+                competition=_safe_float(row.get("competition")),
+                cpc=_safe_float(row.get("cpc")),
                 impressions_last_30d=i_last,
                 clicks_last_30d=c_last,
                 sessions_last_30d=s_last,
@@ -224,12 +268,12 @@ def analyze_and_persist_dataset(
                 trend_classification=trend_cls,
             ))
 
-            score_val = float(row["opportunity_score"])
-            prob_val = float(row.get("ml_probability", row.get("ml_opportunity_probability", 0.50)))
-            priority_val = str(row["priority"])
-            action_val = str(row["action"])
-            reason_val = str(row["primary_reason"])
-            rank_val = int(row.get("queue_rank", start_idx + offset + 1))
+            score_val = _safe_float(row.get("opportunity_score"), 50.0)
+            prob_val = _safe_float(row.get("ml_probability", row.get("ml_opportunity_probability", 0.50)), 0.50)
+            priority_val = str(row.get("priority", "MEDIUM"))
+            action_val = str(row.get("action", "MONITOR"))
+            reason_val = str(row.get("primary_reason", "Opportunity identified."))
+            rank_val = int(row.get("queue_rank") or (start_idx + offset + 1))
 
             conf_tier = "HIGH" if (vis >= 500 and sessions >= 30) else ("MEDIUM" if (vis >= 100 and sessions >= 10) else "LOW")
             status_val = str(row.get("content_status") or "")
@@ -259,7 +303,6 @@ def analyze_and_persist_dataset(
                 confidence_tier=conf_tier,
                 reasons_json=str(row.get("reasons_json") or ""),
             ))
-
 
             rec_objs.append(Recommendation(
                 page_id=p_id,

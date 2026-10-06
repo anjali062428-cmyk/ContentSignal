@@ -82,7 +82,14 @@ def evaluate_dataset_readiness(
         reasons.append(f"Insufficient row count ({row_count} < 10).")
 
     # 3. Content records check
-    if entity_type == "seller_directory" or (not has_content and not caps.get("SEARCH")):
+    if is_wide_time_series or caps.get("TIME_SERIES"):
+        checks.append({
+            "name": "Content records",
+            "status": "PASS",
+            "message": "Time-series content records detected.",
+            "details": f"Temporal series detected across {row_count:,} entity records."
+        })
+    elif entity_type == "seller_directory" or (not has_content and not caps.get("SEARCH")):
         checks.append({
             "name": "Content records",
             "status": "FAIL",
@@ -333,7 +340,7 @@ def evaluate_dataset_readiness(
         "readiness_pct": score,
         "suggested_adapter": suggested_adapter,
         "effective_target": effective_target,
-        "is_ready": status in ("READY", "READY_WITH_LIMITATIONS"),
+        "is_ready": status in ("READY", "READY_WITH_LIMITATIONS", "TIME_SERIES", "LARGE_DATASET") and fail_count == 0,
         "checks": checks,
         "checklist": checks,
         "warnings": warnings,

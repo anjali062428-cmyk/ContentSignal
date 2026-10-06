@@ -21,6 +21,7 @@ import {
 import { DatasetSelector } from "@/components/DatasetSelector";
 import { getToken, removeToken } from "@/lib/api";
 import { useDataset } from "@/context/DatasetContext";
+import { useClerk } from "@clerk/nextjs";
 
 interface TopHeaderProps {
   onMobileToggle: () => void;
@@ -92,9 +93,14 @@ export function TopHeader({ onMobileToggle }: TopHeaderProps) {
     }
   };
 
-  const handleLogout = () => {
+  const { signOut } = useClerk();
+
+  const handleLogout = async () => {
     removeToken();
     setHasToken(false);
+    try {
+      await signOut();
+    } catch {}
     router.push("/auth");
   };
 

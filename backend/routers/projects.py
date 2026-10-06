@@ -191,6 +191,7 @@ def list_projects(
 def get_project_detail(
     project_id: str,
     db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
 ):
     """
     SRS Section 24.1: GET /projects/{project_id} - get project details and current active run summary.
@@ -199,6 +200,10 @@ def get_project_detail(
     ds = db.query(Dataset).filter(Dataset.dataset_id == target_id).first()
     if not ds:
         raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found.")
+
+    if ds.user_id is not None and not ds.is_starter:
+        if current_user and ds.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Access denied: You do not have permission to view this project.")
 
     def parse_json(val):
         if not val:

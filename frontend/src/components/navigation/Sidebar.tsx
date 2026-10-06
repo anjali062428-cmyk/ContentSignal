@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import { getToken, removeToken } from "@/lib/api";
+import { useClerk } from "@clerk/nextjs";
 
 export interface NavItem {
   id: string;
@@ -71,10 +72,15 @@ export function Sidebar({
     setHasToken(!!getToken());
   }, [pathname]);
 
-  const handleLogout = () => {
+  const { signOut } = useClerk();
+
+  const handleLogout = async () => {
     removeToken();
     setHasToken(false);
     onMobileClose();
+    try {
+      await signOut();
+    } catch {}
     router.push("/auth");
   };
 

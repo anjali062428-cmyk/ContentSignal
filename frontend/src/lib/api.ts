@@ -8,6 +8,39 @@ if (!rawBase.endsWith("/api")) {
 }
 const API_BASE = rawBase;
 
+let clerkTokenGetter: (() => Promise<string | null>) | null = null;
+
+export function registerClerkTokenGetter(getter: () => Promise<string | null>) {
+  clerkTokenGetter = getter;
+}
+
+export async function getAuthToken(): Promise<string | null> {
+  if (typeof window === "undefined") return null;
+
+  if (clerkTokenGetter) {
+    try {
+      const tok = await clerkTokenGetter();
+      if (tok) {
+        localStorage.setItem("ci_token", tok);
+        return tok;
+      }
+    } catch {}
+  }
+
+  try {
+    const clerk = (window as any).Clerk;
+    if (clerk?.session) {
+      const tok = await clerk.session.getToken();
+      if (tok) {
+        localStorage.setItem("ci_token", tok);
+        return tok;
+      }
+    }
+  } catch {}
+
+  return localStorage.getItem("ci_token");
+}
+
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem("ci_token");
@@ -26,7 +59,7 @@ export function removeToken(): void {
 }
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const token = getToken();
+  const token = await getAuthToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(options.headers as Record<string, string>),

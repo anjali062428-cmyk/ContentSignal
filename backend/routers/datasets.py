@@ -123,11 +123,19 @@ def list_datasets(
 
 
 @router.get("/{dataset_id}", response_model=DatasetDetailResponse)
-def get_dataset(dataset_id: str, db: Session = Depends(get_db)):
+def get_dataset(
+    dataset_id: str,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
+):
     """Retrieves dataset metadata, validation, capabilities, and readiness summary."""
     ds = db.query(Dataset).filter(Dataset.dataset_id == dataset_id).first()
     if not ds:
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found.")
+
+    if ds.user_id is not None and not ds.is_starter:
+        if current_user and ds.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Access denied: You do not have permission to view this dataset.")
     
     def parse_json(val):
         if not val:
@@ -360,6 +368,13 @@ def create_analysis_job(
     if not ds:
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found.")
 
+    if ds.user_id is not None and not ds.is_starter:
+        if current_user and ds.user_id != current_user.id:
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied: You do not have permission to analyze this dataset.",
+            )
+
     if ds.validation_status == "invalid":
         raise HTTPException(
             status_code=400,
@@ -547,6 +562,13 @@ def delete_dataset(
             status_code=400,
             detail="Deletion Forbidden: The bundled FlyRank Starter/Demo Dataset cannot be deleted or archived.",
         )
+
+    if ds.user_id is not None and not ds.is_starter:
+        if current_user and ds.user_id != current_user.id:
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied: You do not have permission to delete this dataset.",
+            )
 
     db.query(Opportunity).filter(Opportunity.dataset_id == dataset_id).delete(synchronize_session=False)
     db.query(Page).filter(Page.dataset_id == dataset_id).delete(synchronize_session=False)

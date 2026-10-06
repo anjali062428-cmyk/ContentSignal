@@ -64,6 +64,12 @@ def ensure_columns():
                     conn.execute(text("ALTER TABLE users ADD COLUMN mobile_otp_expires_at DATETIME"))
                 if "mobile_otp_attempts" not in user_cols:
                     conn.execute(text("ALTER TABLE users ADD COLUMN mobile_otp_attempts INTEGER DEFAULT 0"))
+                if "clerk_user_id" not in user_cols:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN clerk_user_id VARCHAR(255)"))
+                    try:
+                        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_clerk_user_id ON users (clerk_user_id)"))
+                    except Exception:
+                        pass
                 conn.commit()
 
                 # Ensure email column is nullable to allow phone-only user registrations

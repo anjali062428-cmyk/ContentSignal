@@ -20,18 +20,20 @@ APP_ENV = os.getenv("APP_ENV", os.getenv("ENVIRONMENT", "development")).lower()
 FRONTEND_URL = (os.getenv("FRONTEND_URL") or "").strip()
 
 
-# JWT Configuration
-_jwt_env = os.getenv("JWT_SECRET")
-if APP_ENV == "production":
-    if not _jwt_env or "change-in-production" in _jwt_env.lower():
-        raise RuntimeError(
-            "CRITICAL SECURITY CONFIGURATION ERROR: JWT_SECRET environment variable must be set in production mode. "
-            "Refusing to start with default or insecure secret."
-        )
-    JWT_SECRET = _jwt_env
-else:
-    JWT_SECRET = _jwt_env or "contentsignal-local-dev-jwt-secret-not-for-production"
+# Clerk Authentication Configuration
+CLERK_SECRET_KEY = (os.getenv("CLERK_SECRET_KEY") or "").strip()
+CLERK_PUBLISHABLE_KEY = (
+    os.getenv("CLERK_PUBLISHABLE_KEY") or 
+    os.getenv("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY") or 
+    ""
+).strip()
+CLERK_JWT_KEY = (os.getenv("CLERK_JWT_KEY") or os.getenv("CLERK_PEM_PUBLIC_KEY") or "").strip()
+CLERK_JWKS_URL = (os.getenv("CLERK_JWKS_URL") or "").strip()
+CLERK_ISSUER = (os.getenv("CLERK_ISSUER") or "").strip()
 
+# Legacy / Testing JWT Configuration
+_jwt_env = os.getenv("JWT_SECRET")
+JWT_SECRET = _jwt_env or "contentsignal-clerk-transition-jwt-secret"
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_MINUTES = 60 * 24  # 24 hours
 

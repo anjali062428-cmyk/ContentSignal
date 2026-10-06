@@ -36,59 +36,26 @@ def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta]
     return jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
+from fastapi import Request
+from backend.clerk_auth import get_current_clerk_user, get_optional_clerk_user
+
+
 def get_current_user(
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: Session = Depends(get_db),
 ) -> User:
-    """Validates JWT bearer token and retrieves user by uid, email, or mobile number."""
-    if not credentials:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    token = credentials.credentials
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        sub: str = payload.get("sub")
-        uid = payload.get("uid")
-        if not sub and not uid:
-            raise HTTPException(status_code=401, detail="Invalid token subject")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-
-    user = None
-    if uid:
-        user = db.query(User).filter(User.id == uid).first()
-    if not user and sub:
-        user = db.query(User).filter(or_(User.email == sub, User.mobile_number == sub)).first()
-
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-    if not user.is_active:
-        raise HTTPException(status_code=403, detail="Inactive user account")
-    return user
+    """
+    Validates authentication token via Clerk and retrieves or provisions
+    the mapped ContentSignal user record.
+    """
+    return get_current_clerk_user(request=request, credentials=credentials, db=db)
 
 
 def get_optional_current_user(
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: Session = Depends(get_db),
 ) -> Optional[User]:
-    """Retrieves user if valid token provided, otherwise returns None gracefully."""
-    if not credentials:
-        return None
-    token = credentials.credentials
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        sub: str = payload.get("sub")
-        uid = payload.get("uid")
-        if not sub and not uid:
-            return None
-        user = None
-        if uid:
-            user = db.query(User).filter(User.id == uid).first()
-        if not user and sub:
-            user = db.query(User).filter(or_(User.email == sub, User.mobile_number == sub)).first()
-        return user if (user and user.is_active) else None
-    except JWTError:
-        return None
+    """Retrieves user if valid Clerk token provided, otherwise returns None gracefully."""
+    return get_optional_clerk_user(request=request, credentials=credentials, db=db)

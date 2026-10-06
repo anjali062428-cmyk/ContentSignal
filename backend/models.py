@@ -13,12 +13,13 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
+    clerk_user_id = Column(String(255), unique=True, index=True, nullable=True)
     email = Column(String(255), unique=True, index=True, nullable=True)
     mobile_number = Column(String(32), unique=True, index=True, nullable=True)
     country_code = Column(String(8), default="+91", nullable=True)
     email_verified = Column(Boolean, default=False, nullable=True)
     mobile_verified = Column(Boolean, default=False, nullable=True)
-    hashed_password = Column(String(255), nullable=False)
+    hashed_password = Column(String(255), nullable=True, default="")
     full_name = Column(String(255), nullable=True)
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=True)  # Overall active/verified status

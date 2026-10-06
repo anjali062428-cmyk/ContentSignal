@@ -142,6 +142,7 @@ class UserResponse(BaseModel):
     mobile_number: Optional[str] = None
     country_code: Optional[str] = "+91"
     full_name: Optional[str] = None
+    clerk_user_id: Optional[str] = None
     is_active: bool = True
     is_verified: bool = True
     onboarded: bool = True

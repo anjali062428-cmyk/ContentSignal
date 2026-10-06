@@ -89,7 +89,7 @@ export default function LandingPage() {
               {/* CTA Buttons */}
               <div className="animate-hero-fade-up animation-delay-450 flex flex-wrap items-center gap-4 pt-1">
                 <Link
-                  href="/auth"
+                  href="/auth/sign-in"
                   className="group inline-flex items-center gap-2 px-6 py-3.5 rounded-xl text-sm font-semibold bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white shadow-glow hover:shadow-glow-cyan transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0"
                 >
                   Get Started
@@ -97,6 +97,7 @@ export default function LandingPage() {
                 </Link>
                 <Link
                   href="/dashboard"
+                  prefetch={false}
                   className="group inline-flex items-center gap-2 px-6 py-3.5 rounded-xl text-sm font-semibold glass-card text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800/80 transition-all duration-200 hover:-translate-y-0.5 border border-slate-200/90 dark:border-slate-800/90 hover:border-teal-500/40"
                 >
                   Explore Platform
@@ -108,6 +109,7 @@ export default function LandingPage() {
               <div className="animate-hero-fade-up animation-delay-450 pt-5 border-t border-slate-200/80 dark:border-slate-800/80 grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-xl">
                 <Link
                   href="/dashboard/analytics"
+                  prefetch={false}
                   title="View Performance Analytics"
                   className="group flex items-start gap-2.5 p-2.5 rounded-xl bg-slate-50/60 dark:bg-slate-900/40 border border-slate-200/60 dark:border-slate-800/60 hover:border-teal-500/40 hover:bg-teal-50/30 dark:hover:bg-teal-950/20 transition-all cursor-pointer"
                 >
@@ -122,6 +124,7 @@ export default function LandingPage() {
 
                 <Link
                   href="/dashboard/opportunities"
+                  prefetch={false}
                   title="Find Content Opportunities"
                   className="group flex items-start gap-2.5 p-2.5 rounded-xl bg-slate-50/60 dark:bg-slate-900/40 border border-slate-200/60 dark:border-slate-800/60 hover:border-cyan-500/40 hover:bg-cyan-50/30 dark:hover:bg-cyan-950/20 transition-all cursor-pointer"
                 >
@@ -136,6 +139,7 @@ export default function LandingPage() {
 
                 <Link
                   href="/dashboard/evidence"
+                  prefetch={false}
                   title="Prioritize with Grounded Evidence"
                   className="group flex items-start gap-2.5 p-2.5 rounded-xl bg-slate-50/60 dark:bg-slate-900/40 border border-slate-200/60 dark:border-slate-800/60 hover:border-emerald-500/40 hover:bg-emerald-50/30 dark:hover:bg-emerald-950/20 transition-all cursor-pointer"
                 >
@@ -150,6 +154,7 @@ export default function LandingPage() {
 
                 <Link
                   href="/dashboard/opportunities"
+                  prefetch={false}
                   title="Take Action with Confidence"
                   className="group flex items-start gap-2.5 p-2.5 rounded-xl bg-slate-50/60 dark:bg-slate-900/40 border border-slate-200/60 dark:border-slate-800/60 hover:border-teal-500/40 hover:bg-teal-50/30 dark:hover:bg-teal-950/20 transition-all cursor-pointer"
                 >
@@ -453,6 +458,7 @@ export default function LandingPage() {
         <div className="pt-2">
           <Link
             href="/dashboard/opportunities"
+            prefetch={false}
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold bg-slate-900 text-white dark:bg-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-all"
           >
             Inspect Ranked Queue

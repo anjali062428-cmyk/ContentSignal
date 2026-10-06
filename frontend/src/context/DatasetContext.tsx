@@ -1,6 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
+import { usePathname } from "next/navigation";
 import { api, DatasetSummary } from "@/lib/api";
 
 interface DatasetContextType {
@@ -18,6 +19,7 @@ const DatasetContext = createContext<DatasetContextType | undefined>(undefined);
 const STORAGE_KEY = "ci_active_dataset_id";
 
 export function DatasetProvider({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
   const [datasets, setDatasets] = useState<DatasetSummary[]>([]);
   const [activeDataset, setActiveDatasetState] = useState<DatasetSummary | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -76,8 +78,16 @@ export function DatasetProvider({ children }: { children: React.ReactNode }) {
   );
 
   useEffect(() => {
-    refreshDatasets();
-  }, [refreshDatasets]);
+    // Only fetch datasets when entering the dashboard
+    // Avoid triggering unauthenticated backend calls on public marketing or auth pages
+    if (pathname?.startsWith("/dashboard")) {
+      if (datasets.length === 0) {
+        refreshDatasets();
+      }
+    } else {
+      setIsLoading(false);
+    }
+  }, [pathname, datasets.length, refreshDatasets]);
 
   return (
     <DatasetContext.Provider

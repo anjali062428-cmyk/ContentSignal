@@ -53,14 +53,14 @@ export function MarketingNavbar() {
   const handleLogout = () => {
     removeToken();
     setHasToken(false);
-    router.push("/auth");
+    router.push("/auth/sign-in");
   };
 
   const navItems = [
-    { label: "Platform", href: "/dashboard" },
+    { label: "Platform", href: "/dashboard", prefetch: false },
     { label: "Architecture", href: "/#architecture" },
-    { label: "Opportunities", href: "/dashboard/opportunities" },
-    { label: "Model Benchmarks", href: "/dashboard/models" },
+    { label: "Opportunities", href: "/dashboard/opportunities", prefetch: false },
+    { label: "Model Benchmarks", href: "/dashboard/models", prefetch: false },
   ];
 
   return (
@@ -84,6 +84,7 @@ export function MarketingNavbar() {
               <Link
                 key={item.href}
                 href={item.href}
+                prefetch={item.prefetch ?? undefined}
                 onClick={(e) => {
                   if (item.href === "/#architecture" && pathname === "/") {
                     e.preventDefault();
@@ -118,6 +119,7 @@ export function MarketingNavbar() {
 
           <Link
             href="/dashboard/settings"
+            prefetch={false}
             aria-label="Settings"
             className="p-2 rounded-xl text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-slate-100 dark:hover:bg-slate-900 transition-colors"
           >
@@ -134,7 +136,7 @@ export function MarketingNavbar() {
             </button>
           ) : (
             <Link
-              href="/auth"
+              href="/auth/sign-in"
               className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white dark:bg-slate-100 dark:hover:bg-white dark:text-slate-900 transition-colors shadow-xs"
             >
               <LogIn className="w-3.5 h-3.5" />
@@ -159,6 +161,7 @@ export function MarketingNavbar() {
             <Link
               key={item.href}
               href={item.href}
+              prefetch={item.prefetch ?? undefined}
               onClick={(e) => {
                 setMobileMenuOpen(false);
                 if (item.href === "/#architecture" && pathname === "/") {

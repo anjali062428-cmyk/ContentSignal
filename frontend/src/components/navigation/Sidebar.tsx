@@ -81,7 +81,7 @@ export function Sidebar({
     try {
       await signOut();
     } catch {}
-    router.push("/auth");
+    router.push("/auth/sign-in");
   };
 
   const isItemActive = (item: NavItem) => {

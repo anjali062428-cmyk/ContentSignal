@@ -101,7 +101,7 @@ export function TopHeader({ onMobileToggle }: TopHeaderProps) {
     try {
       await signOut();
     } catch {}
-    router.push("/auth");
+    router.push("/auth/sign-in");
   };
 
   const handleSearchSubmit = (e: React.FormEvent) => {

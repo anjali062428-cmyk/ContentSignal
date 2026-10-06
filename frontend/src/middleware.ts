@@ -13,9 +13,11 @@ export default clerkMiddleware((auth, req) => {
   }
 
   // Only protect authenticated application areas (e.g. /dashboard/*)
-  // Public pages (/, /auth, /architecture, /opportunities, /models, etc.) remain open
+  // Public pages (/, /auth, /auth/sign-in, /auth/sign-up, /architecture, /opportunities, /models, etc.) remain open
   if (isProtectedRoute(req)) {
-    auth().protect();
+    auth().protect({
+      unauthenticatedUrl: new URL("/auth/sign-in", req.url).toString(),
+    });
   }
 });
 

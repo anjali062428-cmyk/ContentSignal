@@ -22,19 +22,11 @@ export default function RootLayout({
         baseTheme: dark,
         variables: {
           colorPrimary: "#0d9488",
-          colorBackground: "#070b14",
-          colorInputBackground: "#0b1220",
+          colorBackground: "#0b1220",
+          colorInputBackground: "#070b14",
           colorInputText: "#f8fafc",
           colorText: "#f8fafc",
           colorTextSecondary: "#94a3b8",
-        },
-        elements: {
-          card: "bg-[#0b1220] border border-slate-800 shadow-2xl rounded-2xl",
-          headerTitle: "text-slate-100 font-bold",
-          headerSubtitle: "text-slate-400 text-sm",
-          formButtonPrimary: "bg-teal-600 hover:bg-teal-500 text-white font-semibold transition-all shadow-md shadow-teal-900/30",
-          formFieldInput: "bg-[#070b14] border-slate-800 text-slate-100 focus:border-teal-500 focus:ring-teal-500/20",
-          footerActionLink: "text-teal-400 hover:text-teal-300 font-medium",
         },
       }}
     >

@@ -1,21 +1,20 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 
-// Public routes accessible without signing in
-const isPublicRoute = createRouteMatcher([
-  "/",
-  "/auth(.*)",
-  "/api(.*)",
-  "/favicon.ico",
+// Only authenticated application areas require sign-in
+const isProtectedRoute = createRouteMatcher([
+  "/dashboard(.*)",
 ]);
 
 export default clerkMiddleware((auth, req) => {
-  // Gracefully skip route protection during build or when key is placeholder
   const pubKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+  // If key is not configured or is a build placeholder, skip middleware enforcement
   if (!pubKey || pubKey.includes("placeholder")) {
     return;
   }
 
-  if (!isPublicRoute(req)) {
+  // Only protect authenticated application areas (e.g. /dashboard/*)
+  // Public pages (/, /auth, /architecture, /opportunities, /models, etc.) remain open
+  if (isProtectedRoute(req)) {
     auth().protect();
   }
 });

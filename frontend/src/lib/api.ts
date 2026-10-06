@@ -557,62 +557,13 @@ export const api = {
     return `${API_BASE}/export/evidence/xlsx?${qs.toString()}`;
   },
 
-  // Auth & Onboarding
-  login: (data: { identifier?: string; email?: string; mobile_number?: string; password: string; remember_me?: boolean }) =>
-    request<any>("/auth/login", { method: "POST", body: JSON.stringify(data) }),
-  register: (data: any) => request<any>("/auth/register", { method: "POST", body: JSON.stringify(data) }),
-  signupInitiate: (data: {
-    full_name: string;
-    auth_type?: "email" | "phone";
-    email?: string;
-    mobile_number?: string;
-    country_code?: string;
-    password: string;
-    confirm_password: string;
-    terms_accepted?: boolean;
-  }) => request<any>("/auth/signup-initiate", { method: "POST", body: JSON.stringify(data) }),
-  signupVerify: (data: { email?: string; mobile_number?: string; identifier?: string; otp: string }) =>
-    request<any>("/auth/signup-verify", { method: "POST", body: JSON.stringify(data) }),
-  signupVerifyEmail: (data: { email?: string; identifier?: string; otp: string }) =>
-    request<any>("/auth/signup-verify-email", { method: "POST", body: JSON.stringify(data) }),
-  signupVerifyMobile: (data: { identifier?: string; mobile_number?: string; email?: string; otp: string }) =>
-    request<any>("/auth/signup-verify-mobile", { method: "POST", body: JSON.stringify(data) }),
-  resendEmailOtp: (data: { email?: string; identifier?: string }) =>
-    request<any>("/auth/resend-email-otp", { method: "POST", body: JSON.stringify(data) }),
-  resendMobileOtp: (data: { identifier?: string; mobile_number?: string; email?: string }) =>
-    request<any>("/auth/resend-mobile-otp", { method: "POST", body: JSON.stringify(data) }),
-  changeContact: (data: { email?: string; current_email?: string; current_identifier?: string; new_email?: string; new_mobile?: string; country_code?: string }) =>
-    request<any>("/auth/change-contact", { method: "POST", body: JSON.stringify(data) }),
-  loginOtpInitiate: (data: { identifier: string }) =>
-    request<any>("/auth/login-otp-initiate", { method: "POST", body: JSON.stringify(data) }),
-  loginOtpVerify: (data: { identifier: string; otp: string }) =>
-    request<any>("/auth/login-otp-verify", { method: "POST", body: JSON.stringify(data) }),
-  forgotPassword: (data: { identifier?: string; email?: string; mobile_number?: string }) =>
-    request<any>("/auth/forgot-password", { method: "POST", body: JSON.stringify(data) }),
-  resetPassword: (data: {
-    identifier?: string;
-    email?: string;
-    mobile_number?: string;
-    otp: string;
-    new_password: string;
-    confirm_password: string;
-  }) => request<any>("/auth/reset-password", { method: "POST", body: JSON.stringify(data) }),
+  // Auth Diagnostics & Session
   getEmailStatus: () => request<any>("/auth/email-status"),
   testEmail: (data: { to_email: string }) =>
     request<any>("/auth/test-email", { method: "POST", body: JSON.stringify(data) }),
-  sendOtp: (data: { email: string; full_name?: string }) =>
-    request<any>("/auth/send-otp", { method: "POST", body: JSON.stringify(data) }),
-  verifyOtp: (data: { email: string; otp: string }) =>
-    request<any>("/auth/verify-otp", { method: "POST", body: JSON.stringify(data) }),
-  verifyEmail: (data: { email: string; token: string }) =>
-    request<any>("/auth/verify-email", { method: "POST", body: JSON.stringify(data) }),
-  resendVerification: (data: { email: string }) =>
-    request<any>("/auth/resend-verification", { method: "POST", body: JSON.stringify(data) }),
-  cancelVerification: (email: string) =>
-    request<any>("/auth/cancel-verification", { method: "POST", body: JSON.stringify({ email }) }),
+  getMe: () => request<any>("/auth/me"),
   completeOnboarding: (data: { onboarded: boolean; primary_goal?: string }) =>
     request<any>("/auth/onboarding", { method: "POST", body: JSON.stringify(data) }),
-  getMe: () => request<any>("/auth/me"),
 
   chatAI: (data: { message: string; page_id?: string; dataset_id?: string }) =>
     request<any>("/ai/chat", { method: "POST", body: JSON.stringify(data) }),

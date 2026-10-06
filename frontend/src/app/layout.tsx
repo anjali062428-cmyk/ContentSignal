@@ -8,6 +8,12 @@ import { Providers } from "@/components/Providers";
 export const metadata: Metadata = {
   title: "ContentSignal — Turn Search Data into Smarter Content Decisions",
   description: "ML-powered Content Intelligence SaaS platform that analyzes webpage search, traffic, and engagement signals to prioritize editorial reviews.",
+  icons: {
+    icon: [
+      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/favicon.ico", sizes: "32x32" },
+    ],
+  },
 };
 
 export default function RootLayout({
